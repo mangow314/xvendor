@@ -1,0 +1,70 @@
+import json
+
+from xvendor.events import Event
+
+SHELL_PREFIXES = ("/bin/bash -lc ", "/bin/sh -lc ")
+QUOTES = ("'", '"')
+
+
+def _load(line: str) -> dict | None:
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _unwrap(command: str) -> str:
+    for prefix in SHELL_PREFIXES:
+        command = command.removeprefix(prefix)
+    if command[:1] in QUOTES:
+        command = command[1:]
+    if command[-1:] in QUOTES:
+        command = command[:-1]
+    return command
+
+
+class CodexVendor:
+    name = "codex"
+
+    def build(self, round: int, session: str | None, prompt: str, profile: str | None) -> list[str]:
+        # -p must precede exec: `codex exec resume -p` is rejected (2026-10-10)
+        pf = ["-p", profile] if profile else []
+        if round == 1:
+            return ["codex", *pf, "exec", "-s", "read-only", "--skip-git-repo-check", "--json", prompt]
+        # resume does not inherit round 1's -s read-only (2026-10-10), so pass it every round
+        return ["codex", *pf, "exec", "resume", "-c", 'sandbox_mode="read-only"', "--skip-git-repo-check",
+                "--json", session, prompt]
+
+    def parse(self, line: str) -> Event | None:
+        ev = _load(line)
+        if ev is None:
+            return None
+        kind = ev.get("type")
+        item = ev.get("item") or {}
+        match kind, item.get("type"):
+            case "item.started", "command_execution":
+                return Event("action", _unwrap(item.get("command", "")))
+            case "item.completed", "agent_message":
+                return Event("note", item.get("text", ""))
+            case ("error" | "turn.failed"), _:
+                return Event("error", ev.get("message") or (ev.get("error") or {}).get("message") or line)
+            case "turn.completed", _:
+                return Event("done", "")
+        return None
+
+    def result(self, lines: list[str]) -> tuple[str | None, str, bool]:
+        session, response, ok = None, "", False
+        for line in lines:
+            ev = _load(line)
+            if ev is None:
+                continue
+            kind = ev.get("type")
+            item = ev.get("item") or {}
+            if kind == "thread.started" and session is None:
+                session = ev.get("thread_id")
+            elif kind == "item.completed" and item.get("type") == "agent_message":
+                response = item.get("text", "")
+            elif kind == "turn.completed":
+                ok = True
+        return session, response, ok

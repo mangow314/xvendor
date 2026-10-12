@@ -1,4 +1,5 @@
 import argparse
+import errno
 import os
 import re
 import signal
@@ -292,6 +293,13 @@ def main() -> None:
     except (Fail, JobError) as e:
         print(f"xv: {e}", file=sys.stderr)
         rc = 2
+    except OSError as e:
+        print(f"xv: {e}", file=sys.stderr)
+        if e.errno == errno.EROFS:
+            # seen 2026-10-12: xv chained with another command stays inside Claude's sandbox
+            print("xv: 在 Claude 沙箱內請用單獨一條 ~/.local/bin/xv … 指令（串接的呼叫會留在沙箱內）",
+                  file=sys.stderr)
+        rc = 1
     except KeyboardInterrupt:
         rc = 130
     raise SystemExit(rc)

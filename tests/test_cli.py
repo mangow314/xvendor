@@ -172,3 +172,31 @@ def test_run_prints_carry_first(xv, data):
     assert proc.stdout.startswith("PREVIOUS ROUND TAIL\n")
     assert "codex | " in proc.stdout
     assert not carry.exists()
+
+
+def test_readonly_data_dir_message(xv, data):
+    data.mkdir()
+    data.chmod(0o500)
+    try:
+        proc = xv("start", "codex", "-m", "x", "--no-pane")
+    finally:
+        data.chmod(0o700)
+    assert proc.returncode == 1
+    assert proc.stderr.startswith("xv: ")
+    assert "Traceback" not in proc.stderr
+
+
+def test_erofs_hint(monkeypatch, capsys, tmp_path):
+    import errno
+    from xvendor import cli
+
+    def boom(store, args):
+        raise OSError(errno.EROFS, "Read-only file system", str(tmp_path))
+    monkeypatch.setitem(cli.COMMANDS, "list", boom)
+    monkeypatch.setenv("XV_DATA", str(tmp_path))
+    monkeypatch.setattr(sys, "argv", ["xv", "list"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("xv: ") and "單獨一條" in err

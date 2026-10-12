@@ -22,19 +22,24 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
     (home / ".netrc").write_text("x")
+    state = home / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "builtin").mkdir()
+    (state / "settings.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
     uid = os.getuid()
     tmux_root = tmp_path / "tmuxroot"
     (tmux_root / f"tmux-{uid}").mkdir(parents=True)
     monkeypatch.setenv("TMUX_TMPDIR", str(tmux_root))
     tmp = tmp_path / "agytmp"
-    gemini = str(home / ".gemini")
+    st = str(state)
     hide = ["--tmpfs", f"/run/user/{uid}"] if os.path.isdir(f"/run/user/{uid}") else []
     assert wrap("agy", ["agy", "-p", "hi"], tmp) == [
         "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
         *hide, "--tmpfs", f"{tmux_root}/tmux-{uid}",
         "--tmpfs", str(home / ".ssh"), "--ro-bind", "/dev/null", str(home / ".netrc"),
-        "--bind", gemini, gemini, "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
+        "--bind", st, st, "--ro-bind", f"{st}/settings.json", f"{st}/settings.json",
+        "--ro-bind", f"{st}/bin", f"{st}/bin", "--ro-bind", f"{st}/builtin", f"{st}/builtin", "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
         "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--die-with-parent", "--", "agy", "-p", "hi"]
 
 
@@ -88,7 +93,10 @@ def test_real_bwrap_hides_secrets(tmp_path_factory, monkeypatch):
     (home / ".ssh").mkdir()
     (home / ".ssh" / "id_test").write_text("PRIVATE")
     (home / ".netrc").write_text("machine x password p")
-    (home / ".gemini").mkdir()
+    state = home / ".gemini" / "antigravity-cli"
+    for d in ("bin", "builtin"):
+        (state / d).mkdir(parents=True, exist_ok=True)
+    (state / "settings.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
     tmp = tmp_path_factory.mktemp("agytmp")
     # a file masked with /dev/null is mounted nodev by bwrap, so reading it fails instead of returning ""
@@ -100,3 +108,35 @@ def test_real_bwrap_hides_secrets(tmp_path_factory, monkeypatch):
     assert proc.stdout.splitlines()[0] == "[]"
     assert proc.stdout.splitlines()[1] in ("''", "denied")
     assert (home / ".ssh" / "id_test").read_text() == "PRIVATE"  # host copy untouched
+
+
+@needs_bwrap
+def test_real_bwrap_gemini_narrowed(tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    state = home / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "builtin").mkdir()
+    (state / "settings.json").write_text("{}")
+    (home / ".gemini" / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    tmp = tmp_path_factory.mktemp("agytmp")
+    targets = {"state": state / "brain-x", "config": state / "settings.json", "bin": state / "bin" / "agentapi",
+               "top": home / ".gemini" / "settings.json"}
+    code = "import sys\nfor name, path in " + repr([(k, str(v)) for k, v in targets.items()]) + ":\n" \
+           "    try: open(path, 'w').write('x'); print(name, 'ok')\n" \
+           "    except OSError: print(name, 'denied')"
+    proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.split("\n")[:4] == ["state ok", "config denied", "bin denied", "top denied"]
+    assert (state / "settings.json").read_text() == "{}"
+
+
+@needs_bwrap
+def test_agy_refused_when_protected_entry_missing(tmp_path, monkeypatch):
+    state = tmp_path / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "builtin").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(UnsupportedPlatform, match="settings.json"):
+        wrap("agy", ["agy"], tmp_path)
+    assert not (state / "settings.json").exists()

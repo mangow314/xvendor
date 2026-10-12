@@ -14,6 +14,9 @@ SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentia
                 ".netrc", ".claude/.credentials.json",
                 ".codex/auth.json")  # not in Claude's list; codex's own login token
 
+# Under ~/.gemini/antigravity-cli: config (hooks / MCP), the agentapi launcher script, built-in skills.
+STATE_READONLY = ("settings.json", "bin", "builtin")
+
 
 def check(vendor: str) -> None:
     """Raise UnsupportedPlatform when vendor cannot be run read-only here (R3: refuse, never degrade)."""
@@ -50,8 +53,18 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path) -> list[str]:
             hide += ["--tmpfs", str(p)]
         elif p.is_file():
             hide += ["--ro-bind", "/dev/null", str(p)]
-    gemini = str(home / ".gemini")
+    # agy only writes under ~/.gemini/antigravity-cli (measured 2026-10-12); the rest of ~/.gemini stays
+    # read-only. Inside it, re-protect what a later unsandboxed agy run would load or execute.
+    state = home / ".gemini" / "antigravity-cli"
+    protect = []
+    for rel in STATE_READONLY:
+        p = str(state / rel)
+        if not os.path.exists(p):
+            # a missing entry would be creatable inside the writable state dir and loaded by a later
+            # unsandboxed agy run; refuse instead of running unprotected (R3)
+            raise UnsupportedPlatform(f"{p} is missing; run agy once interactively so it exists, then retry")
+        protect += ["--ro-bind", p, p]
     tmp = str(tmpdir)
     return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", *hide,
-            "--bind", gemini, gemini, "--bind", tmp, tmp, "--setenv", "TMPDIR", tmp,
+            "--bind", str(state), str(state), *protect, "--bind", tmp, tmp, "--setenv", "TMPDIR", tmp,
             "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--die-with-parent", "--", *argv]

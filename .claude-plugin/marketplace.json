@@ -1,0 +1,16 @@
+{
+  "name": "xvendor",
+  "owner": {
+    "name": "Mango"
+  },
+  "metadata": {
+    "description": "xv: read-only cross-vendor jobs (codex, agy) from Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "xvendor",
+      "source": "./",
+      "description": "A skill that teaches Claude Code to send read-only review and research jobs to codex and agy with xv."
+    }
+  ]
+}

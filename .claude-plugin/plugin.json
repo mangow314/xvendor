@@ -1,0 +1,11 @@
+{
+  "name": "xvendor",
+  "version": "0.1.0",
+  "description": "A skill that teaches Claude Code to use xv: send read-only review and research jobs to codex and agy, follow along in a tmux pane, and read the result from a job directory. Needs the xv command (uv tool install).",
+  "author": {
+    "name": "Mango"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/mangow314/xvendor",
+  "repository": "https://github.com/mangow314/xvendor"
+}

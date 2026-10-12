@@ -26,7 +26,7 @@ class Parser(argparse.ArgumentParser):
 
 def nonneg_int(value: str) -> int:
     if not re.fullmatch(r"[0-9]+", value):
-        raise argparse.ArgumentTypeError(f"要是非負整數：{value!r}")
+        raise argparse.ArgumentTypeError(f"must be a non-negative integer: {value!r}")
     return int(value)
 
 
@@ -92,11 +92,11 @@ def read_request(args) -> str:
         try:
             req = Path(args.file).read_text(encoding="utf-8")
         except OSError as e:
-            raise Fail(f"--file 讀不到：{args.file}（{e.strerror}）") from None
+            raise Fail(f"cannot read --file {args.file}: {e.strerror}") from None
     else:
         req = args.message
     if not req.strip():
-        raise Fail("需要 --file 或 -m（內容不能是空的）")
+        raise Fail("needs --file or -m, and the request must not be empty")
     return req.rstrip("\n")
 
 
@@ -104,19 +104,19 @@ def cmd_start(store: JobStore, args) -> int:
     req = read_request(args)
     cwd = Path(args.cwd or os.getcwd())
     if not cwd.is_dir():
-        raise Fail(f"--cwd 不存在：{args.cwd}")
+        raise Fail(f"--cwd does not exist: {args.cwd}")
     try:
         isolation.check(args.vendor)
     except isolation.UnsupportedPlatform as e:
         raise Fail(str(e)) from None
     if args.profile is not None:
         if args.vendor != "codex":
-            raise Fail("--profile 只支援 codex")
+            raise Fail("--profile is only supported for codex")
         if not PROFILE_RE.fullmatch(args.profile):
-            raise Fail("--profile 名稱格式不對")
+            raise Fail("invalid --profile name (letters, digits, _ and - only)")
         codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         if not (codex_home / f"{args.profile}.config.toml").is_file():
-            raise Fail(f"找不到 codex profile：{args.profile}.config.toml")
+            raise Fail(f"codex profile not found: {codex_home / (args.profile + '.config.toml')}")
     job = store.create(args.vendor, str(cwd.resolve()), args.timeout, args.no_pane, args.profile, req)
     panes.launch(store, job, 1)
     print(job)
@@ -126,13 +126,13 @@ def cmd_start(store: JobStore, args) -> int:
 def cmd_ask(store: JobStore, args) -> int:
     job = store.resolve(args.job)
     if args.profile is not None or args.cwd is not None or args.no_pane:
-        raise Fail("ask 只接受 --file／-m／--timeout；profile、cwd、pane 沿用 start 時的設定")
+        raise Fail("ask only takes --file, -m and --timeout; profile, cwd and pane stay as set by start")
     req = read_request(args)
     meta = store.meta(job)
     if meta["status"] == "running":
-        raise Fail(f"job 還在跑，先 xv wait {job}")
+        raise Fail(f"job is still running; run xv wait {job} first")
     if not meta["session"]:
-        raise Fail("job 沒有 session id（上一輪可能失敗），無法追問；請重新 start")
+        raise Fail("job has no session id (the last round may have failed), so it cannot be asked again; start a new job")
     n = store.new_round(job, req)
     if args.timeout is not None:
         store.update(job, timeout=args.timeout)
@@ -147,7 +147,7 @@ def cmd_wait(store: JobStore, args) -> int:
     start = time.monotonic()
     while (meta := store.meta(job))["status"] == "running":
         if time.monotonic() - start >= limit:
-            print(f"xv: wait 逾時（{limit}s），job 仍在跑", file=sys.stderr)
+            print(f"xv: wait timed out after {limit}s; the job is still running", file=sys.stderr)
             return 1
         time.sleep(2)
     n = meta["round"]
@@ -161,7 +161,7 @@ def cmd_show(store: JobStore, args) -> int:
     n = args.round if args.round is not None else store.meta(job)["round"]
     path = store.round_dir(job, n) / "response.md"
     if not path.is_file():
-        raise Fail(f"第 {n} 輪沒有回答：{path}")
+        raise Fail(f"round {n} has no response: {path}")
     sys.stdout.write(path.read_text(encoding="utf-8"))
     return 0
 
@@ -179,7 +179,7 @@ def cmd_list(store: JobStore, args) -> int:
 def cmd_stop(store: JobStore, args) -> int:
     job = store.resolve(args.job)
     runner.stop(store, job)
-    print(f"已送出 stop：{job}（xv wait 看收尾，之後可 xv ask 改方向）")
+    print(f"stop sent: {job} (xv wait shows it ending; then xv ask can change direction)")
     return 0
 
 
@@ -187,7 +187,7 @@ def cmd_close(store: JobStore, args) -> int:
     job = store.resolve(args.job)
     meta = store.meta(job)
     if meta["status"] == "running":
-        raise Fail(f"job 還在跑，先 xv stop {job}")
+        raise Fail(f"job is still running; run xv stop {job} first")
     panes.close_pane(meta["pane"])
     store.update(job, pane=None)
     return 0
@@ -230,7 +230,7 @@ def cmd_run(store: JobStore, args) -> int:
         runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event)
         _finish(display, store, job, n)
     except Exception as e:  # runner already marked the job failed; keep the message visible
-        print(f"xv: _run 中途失敗：{e}", file=sys.stderr)
+        print(f"xv: _run failed: {e}", file=sys.stderr)
         rc = 1
     if os.environ.get("XV_PANE") == "1":
         # keep the pane for reading; the next respawn-pane -k or `xv close` ends it
@@ -296,9 +296,9 @@ def main() -> None:
     except OSError as e:
         print(f"xv: {e}", file=sys.stderr)
         if e.errno == errno.EROFS:
-            # seen 2026-10-12: xv chained with another command stays inside Claude's sandbox
-            print("xv: 在 Claude 沙箱內請用單獨一條 ~/.local/bin/xv … 指令（串接的呼叫會留在沙箱內）",
-                  file=sys.stderr)
+            # xv chained with another command (cd, ;, &&, |) stays inside Claude Code's Bash sandbox
+            print("xv: inside Claude Code's Bash sandbox, list xv in sandbox.excludedCommands and run it as "
+                  "a command of its own (no cd, ;, && or |): chained calls stay sandboxed", file=sys.stderr)
         rc = 1
     except KeyboardInterrupt:
         rc = 130

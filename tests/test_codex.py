@@ -111,7 +111,7 @@ def test_parse_fixture_codex_done(v, fixture_lines):
     lines = fixture_lines("codex-done")
     assert parsed(v, lines) == [
         Event("note", json.loads(lines[2])["item"]["text"]),
-        Event("action", "sed -n '1,240p' crates/ab-core/src/paths.rs"),
+        Event("action", "sed -n '1,240p' src/app/paths.py"),
         Event("note", json.loads(lines[5])["item"]["text"]),
         Event("done", ""),
     ]
@@ -120,9 +120,7 @@ def test_parse_fixture_codex_done(v, fixture_lines):
 def test_parse_fixture_codex_failed(v, fixture_lines):
     events = parsed(v, fixture_lines("codex-failed"))
     assert [e.kind for e in events] == ["note", "action", "action", "note", "action", "action", "error", "error"]
-    assert events[1] == Event("action", "wc -l -c /home/mango/.claude/skills/xvendor/scripts/xv.sh; "
-                                        "sed -n '100,140p' /home/mango/.local/share/chezmoi/.chezmoitemplates/"
-                                        "settings.json.tmpl; nl -ba /home/mango/.claude/skills/xvendor/scripts/xv.sh")
+    assert events[1] == Event("action", "wc -l -c /home/user/project/xv.sh; nl -ba /home/user/project/xv.sh")
     assert events[6] == events[7] == Event("error", FLAGGED)
 
 
@@ -137,7 +135,7 @@ def test_result_codex_done(v, fixture_lines):
     session, response, ok = v.result(lines)
     assert session == "01a126af-a00e-7501-bc5e-5b7215dc60ac"
     assert response == json.loads(lines[5])["item"]["text"]
-    assert response.startswith("### 資料目錄路徑管理")
+    assert response.startswith("### Data directory paths")
     assert ok is True
 
 
@@ -146,7 +144,7 @@ def test_result_codex_failed(v, fixture_lines):
     session, response, ok = v.result(lines)
     assert session == "01a1263b-7821-7c52-b722-51a025c3338b"
     assert response == json.loads(lines[7])["item"]["text"]
-    assert response.startswith("已找到可繞過限制的入口")
+    assert response.startswith("Found a possible way around the restriction")
     assert ok is False
 
 

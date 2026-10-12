@@ -58,7 +58,7 @@ def test_codex_done(store, tmp_path, env, fixture_path):
     assert m["session"] == "01a126af-a00e-7501-bc5e-5b7215dc60ac"
     assert m["run_pid"] is None and m["run_pgid"] is None
     assert (rd / "events.jsonl").read_bytes() == fixture_path("codex-done").read_bytes()
-    assert (rd / "response.md").read_text(encoding="utf-8").startswith("### 資料目錄路徑管理")
+    assert (rd / "response.md").read_text(encoding="utf-8").startswith("### Data directory paths")
 
 
 def test_argv_reaches_cli(store, tmp_path, env, fixture_path):
@@ -159,5 +159,5 @@ def test_stop_rejects_not_running(store, tmp_path):
 
 def test_stop_rejects_missing_pgid(store, tmp_path):
     job = new_job(store, tmp_path)
-    with pytest.raises(JobError, match="稍後再試"):
+    with pytest.raises(JobError, match="try again"):
         runner.stop(store, job)

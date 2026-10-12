@@ -8,11 +8,11 @@ class UnsupportedPlatform(Exception):
     pass
 
 
-# Home-relative credential paths hidden from agy. Mirrors the concrete home paths in Claude Code's
-# sandbox denyRead / Read() deny rules (chezmoi safetyLists, 2026-10-11); update both together.
+# Home-relative credential paths hidden from agy: SSH and GPG keys, cloud, Kubernetes and GitHub CLI
+# logins, git / npm / Postgres / netrc credentials, and the Claude Code and codex login tokens.
 SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentials", ".npmrc", ".pgpass",
                 ".netrc", ".claude/.credentials.json",
-                ".codex/auth.json")  # not in Claude's list; codex's own login token
+                ".codex/auth.json")
 
 # Under ~/.gemini/antigravity-cli: config (hooks / MCP), the agentapi launcher script, built-in skills.
 STATE_READONLY = ("settings.json", "bin", "builtin")

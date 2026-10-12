@@ -21,10 +21,10 @@ def d(out):
 
 def test_header(d, out):
     d.header("codex", JOB, 2, 1201)
-    assert "codex | 07b0 | 第 2 輪 | 上限 21 分" in out.getvalue()
+    assert "codex | 07b0 | round 2 | limit 21 min" in out.getvalue()
 
 
-@pytest.mark.parametrize("kind, prefix", [("action", "  執行  "), ("note", "  回報  "), ("error", "  錯誤  ")])
+@pytest.mark.parametrize("kind, prefix", [("action", "  run    "), ("note", "  note   "), ("error", "  error  ")])
 def test_event_prefix(d, out, kind, prefix):
     d.event(Event(kind, "hello"))
     assert out.getvalue() == f"{prefix}hello\n"
@@ -37,7 +37,7 @@ def test_done_prints_nothing(d, out):
 
 def test_event_whitespace_and_truncation(d, out):
     d.event(Event("action", "a \n\t b " + "x" * 200))
-    assert out.getvalue() == "  執行  a b " + "x" * 96 + "\n"
+    assert out.getvalue() == "  run    a b " + "x" * 96 + "\n"
 
 
 def test_markup_left_alone(d, out):
@@ -46,19 +46,19 @@ def test_markup_left_alone(d, out):
 
 
 def test_finish_with_response(d, out):
-    d.finish("done", 12, JOB, "# 標題\n\n- item", ["err line"])
+    d.finish("done", 12, JOB, "# Title\n\n- item", ["err line"])
     text = out.getvalue()
-    assert "[ 回答 ]" in text
-    assert "標題" in text and "item" in text
-    assert "done | 12 秒 | 看全文：xv show 07b0" in text
+    assert "[ response ]" in text
+    assert "Title" in text and "item" in text
+    assert "done | 12s | full text: xv show 07b0" in text
     assert "err line" not in text
 
 
 def test_finish_blank_response(d, out):
     d.finish("failed", 3, JOB, "  \n", ["boom 1", "boom 2"])
     text = out.getvalue()
-    assert "[ 回答 ]" not in text
-    assert "failed | 3 秒" in text
+    assert "[ response ]" not in text
+    assert "failed | 3s" in text
     assert "boom 1" in text and "boom 2" in text
 
 

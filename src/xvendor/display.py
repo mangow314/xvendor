@@ -10,7 +10,7 @@ from xvendor.events import Event
 VENDOR_STYLE = {"codex": "green", "agy": "blue"}
 # same colours as xv-band
 STATUS_STYLE = {"done": "green", "running": "yellow", "failed": "red", "timeout": "red", "stopped": "dim"}
-LABEL = {"action": "執行", "note": "回報", "error": "錯誤"}
+LABEL = {"action": "run", "note": "note", "error": "error"}
 
 
 def _one_line(text: str) -> str:
@@ -30,7 +30,7 @@ class Display:
     def header(self, vendor: str, job: str, n: int, timeout: int) -> None:
         line = Text()
         line.append(vendor, style=VENDOR_STYLE.get(vendor, ""))
-        line.append(f" | {job[-4:]} | 第 {n} 輪 | 上限 {(timeout + 59) // 60} 分")
+        line.append(f" | {job[-4:]} | round {n} | limit {(timeout + 59) // 60} min")
         self._print(line)
         self.console.print(Rule())
 
@@ -38,15 +38,15 @@ class Display:
         if e.kind not in LABEL:
             return
         style = "red" if e.kind == "error" else ""
-        self._print(Text(f"  {LABEL[e.kind]}  {_one_line(e.text)}", style=style))
+        self._print(Text(f"  {LABEL[e.kind]:<5}  {_one_line(e.text)}", style=style))
 
     def finish(self, status: str, secs: int, job: str, response: str, stderr_tail: list[str]) -> None:
         if response.strip():
-            self._print(Text("\n[ 回答 ]"))
+            self._print(Text("\n[ response ]"))
             self.console.print(Markdown(response))
         line = Text("\n")
         line.append(status, style=STATUS_STYLE.get(status, ""))
-        line.append(f" | {secs} 秒 | 看全文：xv show {job[-4:]}")
+        line.append(f" | {secs}s | full text: xv show {job[-4:]}")
         self._print(line)
         if status != "done":
             for s in stderr_tail:

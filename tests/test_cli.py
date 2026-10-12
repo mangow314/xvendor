@@ -44,7 +44,7 @@ def test_start_wait_codex(xv):
     proc = xv("wait", job)
     assert proc.returncode == 0, proc.stderr
     assert re.fullmatch(r"status=done round=1 secs=\d+ response=\S+/round-1/response\.md\n", proc.stdout)
-    assert xv("show", job).stdout.startswith("### 資料目錄路徑管理")
+    assert xv("show", job).stdout.startswith("### Data directory paths")
 
 
 @needs_bwrap
@@ -110,7 +110,7 @@ def test_run_killed_by_sighup_cleans_up(xv, data, fakes_dir, fixture_path, tmp_p
 def test_last4_resolves(xv):
     job = start(xv)
     assert xv("wait", job[-4:]).returncode == 0
-    assert xv("show", job[-4:], "1").stdout.startswith("### 資料目錄路徑管理")
+    assert xv("show", job[-4:], "1").stdout.startswith("### Data directory paths")
 
 
 def test_ask_rejected_while_running(xv):
@@ -159,7 +159,7 @@ def test_watch_finished_round(xv):
     xv("wait", job)
     proc = xv("watch", job)
     assert proc.returncode == 0
-    assert "執行  sed -n '1,240p' crates/ab-core/src/paths.rs" in proc.stdout
+    assert "run    sed -n '1,240p' src/app/paths.py" in proc.stdout
     assert f"done | " in proc.stdout and f"xv show {job[-4:]}" in proc.stdout
 
 
@@ -199,4 +199,4 @@ def test_erofs_hint(monkeypatch, capsys, tmp_path):
         cli.main()
     assert exc.value.code == 1
     err = capsys.readouterr().err
-    assert err.startswith("xv: ") and "單獨一條" in err
+    assert err.startswith("xv: ") and "excludedCommands" in err

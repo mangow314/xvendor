@@ -101,12 +101,12 @@ def stop(store: JobStore, job: str) -> None:
     """Kill the current round's process group; the session is kept so the job can be asked again (R5)."""
     meta = store.meta(job)
     if meta["status"] != "running":
-        raise JobError(f"job 不在 running：{job}")
+        raise JobError(f"job is not running: {job}")
     pgid = meta.get("run_pgid")
     if not pgid:
-        raise JobError(f"job 沒有 run_pgid（剛啟動？稍後再試）：{job}")
+        raise JobError(f"job has no run_pgid yet (just started? try again shortly): {job}")
     store.update(job, stop_requested=True)
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
-        raise JobError(f"找不到執行中的行程（pgid {pgid}）") from None
+        raise JobError(f"no running process found (pgid {pgid})") from None

@@ -123,4 +123,4 @@ def test_respawn_keeps_previous_round_end(server, store, tmp_path):
     panes.launch(store, job, n)
     wait_done(store, job)
     # one finish line per round: none lost to respawn, none duplicated by the carry-over
-    assert history(store.meta(job)["pane"]).count(f"看全文：xv show {job[-4:]}") == 2
+    assert history(store.meta(job)["pane"]).count(f"full text: xv show {job[-4:]}") == 2

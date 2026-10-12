@@ -2,3 +2,8 @@
 __pycache__/
 *.egg-info/
 dist/
+
+# docs/demo/rec-xv.sh output (rebuilt on every recording)
+docs/demo/xv-raw.*
+docs/demo/events.log
+docs/demo/final.txt

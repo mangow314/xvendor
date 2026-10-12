@@ -1,12 +1,20 @@
 [project]
 name = "xvendor"
 version = "0.1.0"
-description = "Cross-vendor headless CLI job runner (xv)"
+description = "Send read-only review and research jobs from Claude Code to codex and agy, with a live tmux pane and a job directory per run"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Mango", email = "mango79314@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = ["rich"]
+
+[project.urls]
+Homepage = "https://github.com/mangow314/xvendor"
+Repository = "https://github.com/mangow314/xvendor"
+Issues = "https://github.com/mangow314/xvendor/issues"
 
 [project.scripts]
 xv = "xvendor.cli:main"

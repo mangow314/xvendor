@@ -33,7 +33,10 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
     monkeypatch.setenv("TMUX_TMPDIR", str(tmux_root))
     tmp = tmp_path / "agytmp"
     st = str(state)
-    hide = ["--tmpfs", f"/run/user/{uid}"] if os.path.isdir(f"/run/user/{uid}") else []
+    monkeypatch.setattr(isolation.os.path, "realpath", lambda p: p)
+    hide = ["--tmpfs", "/run"] if os.path.isdir("/run") else []
+    if os.path.isdir("/tmp/.X11-unix"):
+        hide += ["--tmpfs", "/tmp/.X11-unix"]
     assert wrap("agy", ["agy", "-p", "hi"], tmp) == [
         "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
         *hide, "--tmpfs", f"{tmux_root}/tmux-{uid}",
@@ -41,6 +44,28 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
         "--bind", st, st, "--ro-bind", f"{st}/settings.json", f"{st}/settings.json",
         "--ro-bind", f"{st}/bin", f"{st}/bin", "--ro-bind", f"{st}/builtin", f"{st}/builtin", "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
         "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--die-with-parent", "--", "agy", "-p", "hi"]
+
+
+@needs_bwrap
+def test_agy_x11_tmpfs_follows_host_dir(tmp_path, monkeypatch):
+    real_isdir = os.path.isdir
+    monkeypatch.setattr(isolation.os.path, "isdir", lambda p: True if p == "/tmp/.X11-unix" else real_isdir(p))
+    argv = wrap("agy", ["agy"], tmp_path)
+    assert "/tmp/.X11-unix" in argv and argv[argv.index("/tmp/.X11-unix") - 1] == "--tmpfs"
+    monkeypatch.setattr(isolation.os.path, "isdir", lambda p: False if p == "/tmp/.X11-unix" else real_isdir(p))
+    assert "/tmp/.X11-unix" not in wrap("agy", ["agy"], tmp_path)
+
+
+@needs_bwrap
+def test_resolv_rebound_when_under_run(tmp_path, monkeypatch):
+    real = "/run/systemd/resolve/stub-resolv.conf"
+    real_realpath, real_isfile = os.path.realpath, os.path.isfile
+    monkeypatch.setattr(isolation.os.path, "realpath", lambda p: real if p == "/etc/resolv.conf" else real_realpath(p))
+    monkeypatch.setattr(isolation.os.path, "isfile", lambda p: True if p == real else real_isfile(p))
+    argv = wrap("agy", ["agy"], tmp_path)
+    run_at = next(i for i in range(len(argv) - 1) if argv[i:i + 2] == ["--tmpfs", "/run"])
+    bind_at = next(i for i in range(len(argv) - 2) if argv[i:i + 3] == ["--ro-bind", real, real])
+    assert bind_at > run_at
 
 
 @needs_bwrap
@@ -108,6 +133,23 @@ def test_real_bwrap_hides_secrets(tmp_path_factory, monkeypatch):
     assert proc.stdout.splitlines()[0] == "[]"
     assert proc.stdout.splitlines()[1] in ("''", "denied")
     assert (home / ".ssh" / "id_test").read_text() == "PRIVATE"  # host copy untouched
+
+
+@needs_bwrap
+def test_real_bwrap_hides_run_and_x11(tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    state = home / ".gemini" / "antigravity-cli"
+    for d in ("bin", "builtin"):
+        (state / d).mkdir(parents=True, exist_ok=True)
+    (state / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    tmp = tmp_path_factory.mktemp("agytmp")
+    code = ("import os; print(os.listdir('/run'))\n"
+            "print(os.listdir('/tmp/.X11-unix') if os.path.isdir('/tmp/.X11-unix') else [])\n"
+            "print(len(open('/etc/resolv.conf').read()) >= 0)")
+    proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == ["[]", "[]", "True"]
 
 
 @needs_bwrap

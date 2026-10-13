@@ -37,13 +37,24 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path) -> list[str]:
         # codex enforces read-only itself (-s read-only / sandbox_mode)
         return list(argv)
 
-    # agy's own --sandbox only covers shell; its file tools still write (2026-10-10). A read-only
-    # mount does not stop host sockets (tmux, systemd --user) from running commands outside, so hide them.
+    # agy's own --sandbox only covers shell; its file tools still write (2026-10-10). A read-only mount
+    # does not stop connect() to path-based unix sockets, so hide the whole of /run: docker.sock, the
+    # system and user D-Bus, systemd --user and the like all live there. Same for the X11 socket dir and
+    # the tmux socket dir, which sit under /tmp.
     uid = os.getuid()
     hide = []
-    for d in (f"/run/user/{uid}", f"{os.environ.get('TMUX_TMPDIR') or '/tmp'}/tmux-{uid}"):
-        if os.path.isdir(d):
-            hide += ["--tmpfs", d]
+    if os.path.isdir("/run"):
+        hide += ["--tmpfs", "/run"]
+        # /etc/resolv.conf may be a symlink into /run (systemd-resolved); re-expose just that file so DNS
+        # still works. bwrap mounts in order, so this bind lands on top of the tmpfs above.
+        real = os.path.realpath("/etc/resolv.conf")
+        if real.startswith("/run/") and os.path.isfile(real):
+            hide += ["--ro-bind", real, real]
+    if os.path.isdir("/tmp/.X11-unix"):
+        hide += ["--tmpfs", "/tmp/.X11-unix"]
+    d = f"{os.environ.get('TMUX_TMPDIR') or '/tmp'}/tmux-{uid}"
+    if os.path.isdir(d):
+        hide += ["--tmpfs", d]
     # agy reads whatever it is told to (web pages can carry injected instructions), and what it reads can
     # leave with the conversation: blank out credentials. Placed before the --bind entries below.
     home = Path.home()

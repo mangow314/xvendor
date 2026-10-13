@@ -24,7 +24,7 @@
 - Linux。在 Arch Linux 上測試；codex job 在 macOS 上可能可用，但未測試。
 - Python 3.12 以上，安裝用 [uv](https://docs.astral.sh/uv/)。
 - 至少一個廠商 CLI，已安裝並登入：[codex](https://github.com/openai/codex)（`codex exec`）或 agy（Google 的 Antigravity CLI，`agy -p`）。
-- 跑 agy：需要 [bubblewrap](https://github.com/containers/bubblewrap)（`bwrap`），且 agy 要先互動執行過一次，讓它的狀態目錄存在。缺任一項，`xv start agy` 會拒絕執行。
+- 跑 agy：需要 [bubblewrap](https://github.com/containers/bubblewrap)（`bwrap`），且 agy 要先互動執行過一次，讓它的狀態目錄存在。沒有 `bwrap` 時 `xv start agy` 會拒絕執行；缺狀態目錄時，這一輪會失敗（tmux pane 會顯示缺什麼）。
 - 選用：tmux。在 tmux 裡每個 job 有即時 pane；不在 tmux 裡就背景執行，用 `xv show` 讀結果。
 - 用 plugin 需要 Claude Code。
 
@@ -65,19 +65,20 @@ xv close <job>                     # 關掉 job 的 pane
 xv watch <job>                     # 在任何終端機跟看執行中的這一輪
 ```
 
-`<job>` 可以給完整 id 或末 4 碼。每一輪有逾時（`--timeout`，預設 1200 秒）。job 存在 `~/.local/share/xvendor/jobs/<job-id>/`（設 `XV_DATA` 可改位置），每一輪一個資料夾，內有 `request.md`、`events.jsonl`、`response.md`、`stderr.log`。
+`<job>` 可以給完整 id 或末 4 碼。每一輪有逾時（`start` 的 `--timeout`，預設 1200 秒；`ask` 沿用 job 的逾時，除非另外指定）。job 存在 `~/.local/share/xvendor/jobs/<job-id>/`（設 `XV_DATA` 可改位置，須是只含英數字、`/`、`.`、`_`、`-` 的絕對路徑），每一輪一個資料夾，內有 `request.md`、`events.jsonl`、`response.md`、`stderr.log`。
 
 ## 安全
 
 每個 job 都是唯讀，由 `xv` 強制，不靠 brief 裡的請求：
 
 - **codex** 用 `-s read-only` 執行，這是 codex 自己的沙箱。追問輪會再傳一次 `-c sandbox_mode="read-only"`，因為 resume 的 codex session 不會沿用第一輪的旗標。
-- **agy** 跑在 bubblewrap 裡，整個檔案系統掛成唯讀。只有 agy 自己的狀態目錄（`~/.gemini/antigravity-cli`，其中的設定、啟動腳本與內建 skill 仍是唯讀）和每輪的暫存目錄可寫。`/run/user/<uid>` 和 tmux socket 目錄被蓋掉，agy 沒辦法透過 tmux 或 `systemd --user` 在沙箱外執行指令。家目錄的憑證檔（`~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.config/gh`、`~/.kube`、`~/.git-credentials`、`~/.npmrc`、`~/.pgpass`、`~/.netrc`、`~/.claude/.credentials.json`、`~/.codex/auth.json`）被蓋成空的。agy 自己的 `--sandbox` 擋不住它的寫檔工具，所以 xv 不靠它。上面任何一項設不起來，`xv start agy` 會拒絕執行，不會在沒保護的狀態下跑。
+- **agy** 跑在 bubblewrap 裡，整個檔案系統掛成唯讀。主機上只有 agy 自己的狀態目錄（`~/.gemini/antigravity-cli`，其中的設定、啟動腳本與內建 skill 仍是唯讀）可寫；另外 agy 有一個每輪專用、跑完即刪的暫存目錄。`/run/user/<uid>` 和預設的 tmux socket 目錄（`$TMUX_TMPDIR` 或 `/tmp` 下的 `tmux-<uid>`）被換成空的記憶體資料夾，agy 沒辦法透過 `systemd --user` 或你預設的 tmux server 在沙箱外執行指令。家目錄的憑證檔（`~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.config/gh`、`~/.kube`、`~/.git-credentials`、`~/.npmrc`、`~/.pgpass`、`~/.netrc`、`~/.claude/.credentials.json`、`~/.codex/auth.json`）被蓋成空的。agy 自己的 `--sandbox` 擋不住它的寫檔工具，所以 xv 不靠它。agy 不會在沒有這些保護的狀態下執行：沒有 `bwrap` 時 `xv start agy` 直接拒絕，agy 的狀態目錄不完整時這一輪會失敗。
 
 沒有涵蓋的部分：
 
 - 不擋網路。廠商讀得到的東西都可能隨對話送出去，所以請把每個可讀的檔案都當成已分享給那家廠商。
 - codex 的唯讀靠 codex 自己的沙箱；`xv` 只保證每次都帶上這個旗標。
+- 用自訂 socket 的 tmux server（`tmux -S <路徑>`，不在預設目錄）不會對 agy 隱藏。
 - agy 讀得到上面清單以外的所有檔案，包括 `~/.local/share/xvendor/` 裡的其他 job。skill 會要 Claude 請兩家都別讀那個資料夾，但那只是請求，擋不住。
 
 ## 費用與隱私

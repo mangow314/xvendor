@@ -39,8 +39,9 @@ The repo holds two things:
   [codex](https://github.com/openai/codex) (`codex exec`) or agy (Google's
   Antigravity CLI, `agy -p`).
 - For agy: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`),
-  and agy run once interactively so its state directory exists. Without them
-  `xv start agy` refuses to run.
+  and agy run once interactively so its state directory exists. Without
+  `bwrap`, `xv start agy` refuses to run; without the state directory, the
+  round fails (the tmux pane shows what is missing).
 - Optional: tmux. Inside tmux each job gets a live pane; outside tmux it runs
   in the background and you read the result with `xv show`.
 - For the plugin: Claude Code.
@@ -87,8 +88,10 @@ xv watch <job>                     # follow a running round from any terminal
 ```
 
 `<job>` can be the full id or its last 4 characters. Each round has a
-timeout (`--timeout`, default 1200 seconds). Jobs live in
-`~/.local/share/xvendor/jobs/<job-id>/` (set `XV_DATA` to move them), one
+timeout (`--timeout` on `start`, default 1200 seconds; `ask` keeps the
+job's timeout unless given a new one). Jobs live in
+`~/.local/share/xvendor/jobs/<job-id>/` (set `XV_DATA` to an absolute path
+of letters, digits, `/`, `.`, `_` and `-` to move them), one
 folder per round with `request.md`, `events.jsonl`, `response.md` and
 `stderr.log`.
 
@@ -100,17 +103,20 @@ Every job is read-only, enforced by `xv` rather than left to the brief:
   pass `-c sandbox_mode="read-only"` again, because a resumed codex session
   does not keep the first round's flag.
 - **agy** runs inside bubblewrap with the whole filesystem mounted
-  read-only. Only agy's own state directory (`~/.gemini/antigravity-cli`,
-  minus its settings, launcher and built-in skills, which stay read-only)
-  and a per-round temp directory are writable. `/run/user/<uid>` and the
-  tmux socket directory are hidden, so agy cannot ask tmux or
-  `systemd --user` to run a command outside the sandbox. Credential files in
+  read-only. On the host, only agy's own state directory
+  (`~/.gemini/antigravity-cli`, minus its settings, launcher and built-in
+  skills, which stay read-only) is writable; agy also gets a per-round temp
+  directory, deleted afterwards. `/run/user/<uid>` and the default tmux
+  socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
+  empty in-memory folders, so agy cannot reach `systemd --user` or your
+  default tmux server to run a command outside the sandbox. Credential files in
   your home directory (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`,
   `~/.kube`, `~/.git-credentials`, `~/.npmrc`, `~/.pgpass`, `~/.netrc`,
   `~/.claude/.credentials.json`, `~/.codex/auth.json`) are blanked out.
   agy's own `--sandbox` flag does not stop its file-writing tools, so xv does
-  not rely on it. If any of this cannot be set up, `xv start agy` refuses
-  instead of running unprotected.
+  not rely on it. agy never runs without this: `xv start agy` refuses when
+  `bwrap` is missing, and the round fails if agy's state directory is
+  incomplete.
 
 What this does not cover:
 
@@ -118,6 +124,8 @@ What this does not cover:
   its conversation, so treat every readable file as shared with that vendor.
 - codex's read-only mode is codex's own sandbox; `xv` only makes sure the
   flag is always passed.
+- A tmux server on a custom socket (`tmux -S <path>` outside the default
+  directory) is not hidden from agy.
 - agy can read every file that is not on the list above, including other
   jobs in `~/.local/share/xvendor/`. The skill tells Claude to ask each
   vendor not to read that folder, but that is a request, not a wall.

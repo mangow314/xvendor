@@ -4,7 +4,7 @@
 
 A real `xv start codex` run (codex-cli 0.162.0), recorded in a throwaway repo
 holding a short `greet.py` with a division by zero. Requirements: `tmux`,
-[vhs](https://github.com/charmbracelet/vhs), `ffmpeg`, the fonts Sarasa Term
+[vhs](https://github.com/charmbracelet/vhs), `ffmpeg`, `bc`, the fonts Sarasa Term
 TC and Symbols Nerd Font, a logged-in `codex`, and `uv sync` run once in this
 repo (the script uses `.venv/bin/xv` from this checkout).
 
@@ -19,7 +19,7 @@ repo (the script uses `.venv/bin/xv` from this checkout).
    next to itself. The first argument replaces the brief; ask for English,
    or codex may follow its own instructions files and answer in another
    language.
-2. Cut, crop and encode. The crop keeps the first 21 character rows (12 px
+2. Cut, crop and encode, from `docs/demo/`. The crop keeps the first 21 character rows (12 px
    padding + 20.3 px per row); the rest of the screen is empty:
 
    ```bash

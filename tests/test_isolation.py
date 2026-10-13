@@ -302,3 +302,40 @@ def test_agy_refused_when_protected_entry_missing(tmp_path, monkeypatch):
     with pytest.raises(UnsupportedPlatform, match="settings.json"):
         wrap("agy", ["agy"], tmp_path)
     assert not (state / "settings.json").exists()
+
+
+def _agy_token_home(tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    (home / ".codex" / "hooks").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text("")
+    state = home / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "builtin").mkdir()
+    (state / "conversations").mkdir()
+    (state / "conversations" / "c1").write_text("x")
+    (state / "settings.json").write_text("{}")
+    (state / "antigravity-oauth-token").write_text("AGYTOKEN")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    code = ("import os\n"
+            "try: print(open(" + repr(str(state / "antigravity-oauth-token")) + ").read() or 'EMPTY')\n"
+            "except OSError: print('DENIED')\n"
+            "print(sorted(os.listdir(" + repr(str(state / "conversations")) + ")))")
+    return code, tmp_path_factory.mktemp("vtmp")
+
+
+@needs_bwrap
+def test_real_bwrap_codex_cannot_read_agy_token(tmp_path_factory, monkeypatch):
+    code, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
+    proc = subprocess.run(wrap("codex", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines()[0] in ("EMPTY", "DENIED")
+    assert proc.stdout.splitlines()[1] == "[]"
+
+
+@needs_bwrap
+def test_real_bwrap_agy_keeps_own_token(tmp_path_factory, monkeypatch):
+    code, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
+    proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == ["AGYTOKEN", "['c1']"]

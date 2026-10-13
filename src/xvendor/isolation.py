@@ -16,6 +16,8 @@ class UnsupportedPlatform(Exception):
 SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentials", ".npmrc", ".pgpass",
                 ".netrc", ".claude/.credentials.json",
                 ".codex/auth.json",
+                # agy login token and conversation store; agy itself keeps them via own_state
+                ".gemini/antigravity-cli/antigravity-oauth-token", ".gemini/antigravity-cli/conversations",
                 # Gemini OAuth tokens and account list
                 ".gemini/oauth_creds.json", ".gemini/google_accounts.json",
                 # browser profiles (cookies, saved logins)
@@ -116,7 +118,7 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
             if rel in required_entries:
                 # a missing entry would be creatable inside the writable state dir and loaded by a later
                 # unsandboxed run; refuse instead of running unprotected (R3)
-                raise UnsupportedPlatform(f"{p} is missing; run {vendor} once interactively so it exists, then retry")
+                raise UnsupportedPlatform(f"{p} is missing; create it (or run {vendor} once) so it exists, then retry")
             continue
         protect += ["--ro-bind", p, p]
     tmp = str(tmpdir)

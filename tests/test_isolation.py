@@ -136,6 +136,51 @@ def test_real_bwrap_hides_secrets(tmp_path_factory, monkeypatch):
 
 
 @needs_bwrap
+def test_real_bwrap_hides_new_secrets(tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    files = {"projects/demo/.env": "SECRET=1", ".mozilla/firefox/p/cookies.sqlite": "c",
+             ".gemini/oauth_creds.json": "{tok}", ".codex/sessions/x.jsonl": "s"}
+    for rel, body in files.items():
+        f = home / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(body)
+    state = home / ".gemini" / "antigravity-cli"
+    for d in ("bin", "builtin"):
+        (state / d).mkdir(parents=True, exist_ok=True)
+    (state / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    tmp = tmp_path_factory.mktemp("agytmp")
+    code = ("import os\n"
+            "def rd(p):\n"
+            "    try: return repr(open(p).read())\n"
+            "    except PermissionError: return 'denied'\n"
+            f"print(rd({str(home / 'projects/demo/.env')!r}))\n"
+            f"print(rd({str(home / '.gemini/oauth_creds.json')!r}))\n"
+            f"print(os.listdir({str(home / '.mozilla')!r}))\n"
+            f"print(os.listdir({str(home / '.codex/sessions')!r}))")
+    proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout.splitlines()
+    assert out[0] in ("''", "denied")
+    assert out[1] in ("''", "denied")
+    assert out[2] == "[]"
+    assert out[3] == "[]"
+    for rel, body in files.items():
+        assert (home / rel).read_text() == body  # host copies untouched
+
+
+def test_own_state_not_hidden(tmp_path):
+    home = tmp_path
+    own = home / ".gemini" / "antigravity-cli"
+    (own / "sub").mkdir(parents=True)
+    (home / ".codex").mkdir()
+    (home / ".codex" / "auth.json").write_text("{}")
+    args = isolation._hide_secrets(home, own_state=own)
+    assert not any(a.startswith(str(own)) for a in args)
+    assert str(home / ".codex" / "auth.json") in isolation._hide_secrets(home, own_state=None)
+
+
+@needs_bwrap
 def test_real_bwrap_hides_run_and_x11(tmp_path_factory, monkeypatch):
     home = tmp_path_factory.mktemp("home")
     state = home / ".gemini" / "antigravity-cli"

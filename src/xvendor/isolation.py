@@ -12,7 +12,22 @@ class UnsupportedPlatform(Exception):
 # logins, git / npm / Postgres / netrc credentials, and the Claude Code and codex login tokens.
 SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentials", ".npmrc", ".pgpass",
                 ".netrc", ".claude/.credentials.json",
-                ".codex/auth.json")
+                ".codex/auth.json",
+                # Gemini OAuth tokens and account list
+                ".gemini/oauth_creds.json", ".gemini/google_accounts.json",
+                # browser profiles (cookies, saved logins)
+                ".mozilla", ".config/google-chrome", ".config/chromium", ".config/BraveSoftware",
+                # Bitwarden CLI session / vault data
+                ".config/Bitwarden CLI",
+                # gcloud credentials, Docker registry logins, pass(1) password store
+                ".config/gcloud", ".docker/config.json", ".password-store",
+                # Claude Code account state and conversation transcripts
+                ".claude.json", ".claude/projects",
+                # codex conversation transcripts and prompt history
+                ".codex/sessions", ".codex/history.jsonl")
+
+# Home-relative glob patterns for per-project secret files: .env, .env.* and .envrc.
+SECRET_GLOBS = ("projects/*/.env", "projects/*/.env.*", "projects/*/*/.env", "projects/*/.envrc")
 
 # Under ~/.gemini/antigravity-cli: config (hooks / MCP), the agentapi launcher script, built-in skills.
 STATE_READONLY = ("settings.json", "bin", "builtin")
@@ -28,6 +43,22 @@ def check(vendor: str) -> None:
         raise UnsupportedPlatform(f"agy needs bubblewrap for read-only isolation; not available on {sys.platform}")
     if shutil.which("bwrap") is None:
         raise UnsupportedPlatform("agy needs bubblewrap (bwrap) for read-only isolation; bwrap not found")
+
+
+def _hide_secrets(home: Path, own_state: Path | None) -> list[str]:
+    """bwrap args masking SECRET_PATHS / SECRET_GLOBS under home, skipping anything inside own_state."""
+    out = []
+    paths = [home / rel for rel in SECRET_PATHS]
+    for pattern in SECRET_GLOBS:
+        paths += [p for p in home.glob(pattern) if p.is_file()]
+    for p in paths:
+        if own_state is not None and p.is_relative_to(own_state):
+            continue
+        if p.is_dir():
+            out += ["--tmpfs", str(p)]
+        elif p.is_file():
+            out += ["--ro-bind", "/dev/null", str(p)]
+    return out
 
 
 def wrap(vendor: str, argv: list[str], tmpdir: Path) -> list[str]:
@@ -58,12 +89,7 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path) -> list[str]:
     # agy reads whatever it is told to (web pages can carry injected instructions), and what it reads can
     # leave with the conversation: blank out credentials. Placed before the --bind entries below.
     home = Path.home()
-    for rel in SECRET_PATHS:
-        p = home / rel
-        if p.is_dir():
-            hide += ["--tmpfs", str(p)]
-        elif p.is_file():
-            hide += ["--ro-bind", "/dev/null", str(p)]
+    hide += _hide_secrets(home, home / ".gemini" / "antigravity-cli")
     # agy only writes under ~/.gemini/antigravity-cli (measured 2026-10-12); the rest of ~/.gemini stays
     # read-only. Inside it, re-protect what a later unsandboxed agy run would load or execute.
     state = home / ".gemini" / "antigravity-cli"

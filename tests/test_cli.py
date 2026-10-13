@@ -22,7 +22,15 @@ def data(tmp_path):
 @pytest.fixture
 def xv(data, fakes_dir, fixture_path, tmp_path):
     base = {k: v for k, v in os.environ.items() if not k.startswith(("XV_", "TMUX"))}
-    base.update(XV_DATA=str(data), PATH=f"{fakes_dir}{os.pathsep}{base.get('PATH', '')}",
+    home = tmp_path / "home"
+    (home / ".codex" / "hooks").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text("")
+    agy = home / ".gemini" / "antigravity-cli"
+    (agy / "bin").mkdir(parents=True)
+    (agy / "builtin").mkdir()
+    (agy / "settings.json").write_text("{}")
+    base.pop("CODEX_HOME", None)
+    base.update(HOME=str(home), XV_DATA=str(data), PATH=f"{fakes_dir}{os.pathsep}{base.get('PATH', '')}",
                 XV_FAKE_FIXTURE=str(fixture_path("codex-done")))
 
     def run(*args, **env):
@@ -59,7 +67,7 @@ def test_start_wait_agy(xv, fixture_path):
 def test_ask_resumes_session(xv, tmp_path):
     job = start(xv)
     assert xv("wait", job).returncode == 0
-    argv_out = tmp_path / "argv.json"
+    argv_out = tmp_path / "home" / ".codex" / "argv.json"  # writable state dir inside bwrap
     proc = xv("ask", job, "-m", "again", XV_FAKE_ARGV_OUT=argv_out)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == f"{job} round-2\n"
@@ -203,7 +211,7 @@ def test_erofs_hint(monkeypatch, capsys, tmp_path):
 
 
 def test_run_scrubs_env(xv, tmp_path):
-    out = tmp_path / "env.txt"
+    out = tmp_path / "home" / ".codex" / "env.txt"  # writable state dir inside bwrap
     job = start(xv, XV_FAKE_ENV_OUT=out, XV_PROBE_TOKEN="1")
     assert xv("wait", job).returncode == 0
     names = {line.split("=", 1)[0] for line in out.read_text(encoding="utf-8").splitlines()}

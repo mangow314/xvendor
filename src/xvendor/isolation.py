@@ -1,3 +1,6 @@
+# Read-only isolation for vendor CLIs. agy and codex share one bubblewrap layout (_bwrap): read-only root,
+# writable own state dir with config-like entries re-protected, writable tmpdir, secrets and sockets hidden.
+# codex's own inner sandbox (-s read-only) stays as a second layer. codex runs unwrapped on non-Linux.
 import os
 import shutil
 import sys
@@ -8,7 +11,7 @@ class UnsupportedPlatform(Exception):
     pass
 
 
-# Home-relative credential paths hidden from agy: SSH and GPG keys, cloud, Kubernetes and GitHub CLI
+# Home-relative credential paths hidden from the sandboxed vendor: SSH and GPG keys, cloud, Kubernetes and GitHub CLI
 # logins, git / npm / Postgres / netrc credentials, and the Claude Code and codex login tokens.
 SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentials", ".npmrc", ".pgpass",
                 ".netrc", ".claude/.credentials.json",
@@ -32,17 +35,22 @@ SECRET_GLOBS = ("projects/*/.env", "projects/*/.env.*", "projects/*/*/.env", "pr
 # Under ~/.gemini/antigravity-cli: config (hooks / MCP), the agentapi launcher script, built-in skills.
 STATE_READONLY = ("settings.json", "bin", "builtin")
 
+# Under ~/.codex (or $CODEX_HOME): config, instructions and hook / rule / skill / plugin / agent dirs that a
+# later unsandboxed codex run would load. *.config.toml profile files are added at wrap time.
+CODEX_STATE_READONLY = ("config.toml", "AGENTS.md", "hooks", "rules", "skills", "plugins", "agents")
+CODEX_STATE_REQUIRED = ("config.toml", "hooks")
+
 
 def check(vendor: str) -> None:
     """Raise UnsupportedPlatform when vendor cannot be run read-only here (R3: refuse, never degrade)."""
-    if vendor == "codex":
-        return
-    if vendor != "agy":
+    if vendor not in ("codex", "agy"):
         raise UnsupportedPlatform(f"no isolation defined for vendor {vendor!r}")
+    if vendor == "codex" and sys.platform != "linux":
+        return
     if sys.platform != "linux":
-        raise UnsupportedPlatform(f"agy needs bubblewrap for read-only isolation; not available on {sys.platform}")
+        raise UnsupportedPlatform(f"{vendor} needs bubblewrap for read-only isolation; not available on {sys.platform}")
     if shutil.which("bwrap") is None:
-        raise UnsupportedPlatform("agy needs bubblewrap (bwrap) for read-only isolation; bwrap not found")
+        raise UnsupportedPlatform(f"{vendor} needs bubblewrap (bwrap) for read-only isolation; bwrap not found")
 
 
 def _hide_secrets(home: Path, own_state: Path | None) -> list[str]:
@@ -65,13 +73,24 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path) -> list[str]:
     """Return argv wrapped so the vendor CLI cannot write outside its own state dirs (spec R3)."""
     check(vendor)
     if vendor == "codex":
-        # codex enforces read-only itself (-s read-only / sandbox_mode)
-        return list(argv)
+        if sys.platform != "linux":
+            print(f"xv: codex runs without xv isolation on {sys.platform}", file=sys.stderr)
+            return list(argv)
+        state = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        protect = list(CODEX_STATE_READONLY)
+        extra = sorted(p.name for p in state.glob("*.config.toml")) if state.is_dir() else []
+        return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state)
+    state = Path.home() / ".gemini" / "antigravity-cli"
+    return _bwrap("agy", argv, tmpdir, state, STATE_READONLY, STATE_READONLY, state)
 
-    # agy's own --sandbox only covers shell; its file tools still write (2026-10-10). A read-only mount
-    # does not stop connect() to path-based unix sockets, so hide the whole of /run: docker.sock, the
-    # system and user D-Bus, systemd --user and the like all live there. Same for the X11 socket dir and
-    # the tmux socket dir, which sit under /tmp.
+
+def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_entries, required_entries,
+           own_state: Path) -> list[str]:
+    """Shared bwrap line: read-only root, hidden sockets and secrets, writable state dir with its
+    config-like entries re-protected, writable tmpdir. Layout measured for agy 2026-10-12."""
+    # A read-only mount does not stop connect() to path-based unix sockets, so hide the whole of /run:
+    # docker.sock, the system and user D-Bus, systemd --user and the like all live there. Same for the X11
+    # socket dir and the tmux socket dir, which sit under /tmp.
     uid = os.getuid()
     hide = []
     if os.path.isdir("/run"):
@@ -86,20 +105,19 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path) -> list[str]:
     d = f"{os.environ.get('TMUX_TMPDIR') or '/tmp'}/tmux-{uid}"
     if os.path.isdir(d):
         hide += ["--tmpfs", d]
-    # agy reads whatever it is told to (web pages can carry injected instructions), and what it reads can
-    # leave with the conversation: blank out credentials. Placed before the --bind entries below.
-    home = Path.home()
-    hide += _hide_secrets(home, home / ".gemini" / "antigravity-cli")
-    # agy only writes under ~/.gemini/antigravity-cli (measured 2026-10-12); the rest of ~/.gemini stays
-    # read-only. Inside it, re-protect what a later unsandboxed agy run would load or execute.
-    state = home / ".gemini" / "antigravity-cli"
+    # the vendor reads whatever it is told to (web pages can carry injected instructions), and what it
+    # reads can leave with the conversation: blank out credentials. Placed before the --bind entries below.
+    hide += _hide_secrets(Path.home(), own_state)
+    # Inside the writable state dir, re-protect what a later unsandboxed run would load or execute.
     protect = []
-    for rel in STATE_READONLY:
+    for rel in readonly_entries:
         p = str(state / rel)
         if not os.path.exists(p):
-            # a missing entry would be creatable inside the writable state dir and loaded by a later
-            # unsandboxed agy run; refuse instead of running unprotected (R3)
-            raise UnsupportedPlatform(f"{p} is missing; run agy once interactively so it exists, then retry")
+            if rel in required_entries:
+                # a missing entry would be creatable inside the writable state dir and loaded by a later
+                # unsandboxed run; refuse instead of running unprotected (R3)
+                raise UnsupportedPlatform(f"{p} is missing; run {vendor} once interactively so it exists, then retry")
+            continue
         protect += ["--ro-bind", p, p]
     tmp = str(tmpdir)
     return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", *hide,

@@ -12,9 +12,84 @@ from xvendor.isolation import UnsupportedPlatform, wrap
 needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
 
 
-def test_codex_passthrough(tmp_path):
+def test_codex_passthrough_off_linux(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(isolation.sys, "platform", "darwin")
     argv = ["codex", "exec", "-s", "read-only", "hi"]
     assert wrap("codex", argv, tmp_path) == argv
+    assert "runs without xv isolation" in capsys.readouterr().err
+
+
+def fake_codex_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    state = home / ".codex"
+    (state / "hooks").mkdir(parents=True)
+    (state / "config.toml").write_text("")
+    (state / "local.config.toml").write_text("")
+    (state / "auth.json").write_text("TOKEN")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(isolation.sys, "platform", "linux")
+    monkeypatch.setattr(isolation.shutil, "which", lambda name: "/usr/bin/bwrap")
+    return home, state
+
+
+def test_codex_argv_structure(tmp_path, monkeypatch):
+    home, state = fake_codex_home(tmp_path, monkeypatch)
+    (home / ".gemini").mkdir()
+    (home / ".gemini" / "oauth_creds.json").write_text("{}")
+    st = str(state)
+    argv = wrap("codex", ["codex", "exec", "hi"], tmp_path / "t")
+
+    def has(*seq):
+        return any(argv[i:i + len(seq)] == list(seq) for i in range(len(argv)))
+    assert argv[0] == "bwrap"
+    assert has("--bind", st, st)
+    assert has("--ro-bind", f"{st}/config.toml", f"{st}/config.toml")
+    assert has("--ro-bind", f"{st}/hooks", f"{st}/hooks")
+    assert has("--ro-bind", f"{st}/local.config.toml", f"{st}/local.config.toml")
+    assert has("--tmpfs", "/run")
+    assert not has("--ro-bind", "/dev/null", f"{st}/auth.json")
+    assert has("--ro-bind", "/dev/null", str(home / ".gemini" / "oauth_creds.json"))
+    assert argv[-4:] == ["--", "codex", "exec", "hi"]
+
+
+def test_codex_refused_when_required_missing(tmp_path, monkeypatch):
+    home, state = fake_codex_home(tmp_path, monkeypatch)
+    (state / "hooks").rmdir()
+    with pytest.raises(UnsupportedPlatform, match="hooks"):
+        wrap("codex", ["codex"], tmp_path)
+
+
+def test_codex_refused_without_bwrap_on_linux(tmp_path, monkeypatch):
+    fake_codex_home(tmp_path, monkeypatch)
+    monkeypatch.setattr(isolation.shutil, "which", lambda name: None)
+    with pytest.raises(UnsupportedPlatform, match="bwrap"):
+        wrap("codex", ["codex"], tmp_path)
+
+
+@needs_bwrap
+def test_real_bwrap_codex_state(tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    state = home / ".codex"
+    (state / "hooks").mkdir(parents=True)
+    (state / "sessions").mkdir()
+    (state / "config.toml").write_text("")
+    (state / "auth.json").write_text("TOKEN")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    tmp = tmp_path_factory.mktemp("codextmp")
+    code = ("import os\n"
+            "def w(p):\n"
+            "    try: open(p, 'w').write('x'); return 'ok'\n"
+            "    except OSError: return 'denied'\n"
+            f"print(w({str(state / 'sessions/new')!r}))\n"
+            f"print(w({str(state / 'config.toml')!r}))\n"
+            f"print(w({str(state / 'hooks/x')!r}))\n"
+            f"print(open({str(state / 'auth.json')!r}).read())\n"
+            "print(os.listdir('/run'))")
+    proc = subprocess.run(wrap("codex", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == ["ok", "denied", "denied", "TOKEN", "[]"]
 
 
 @needs_bwrap

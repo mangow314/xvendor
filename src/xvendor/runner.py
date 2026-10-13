@@ -40,7 +40,7 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     rd = store.round_dir(job, n)
     prompt = (rd / "request.md").read_text(encoding="utf-8").rstrip("\n")
     store.update(job, run_pid=os.getpid())
-    tmpdir = Path(tempfile.mkdtemp(prefix="xv-agy-")) if vendor.name == "agy" else None
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"xv-{vendor.name}-"))
     proc = None
     timers: list[threading.Timer] = []
     timed_out = threading.Event()
@@ -100,8 +100,7 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
         if proc is not None and proc.poll() is None:
             _killpg(proc.pid, signal.SIGKILL)
             proc.wait()
-        if tmpdir is not None:
-            shutil.rmtree(tmpdir, ignore_errors=True)
+        shutil.rmtree(tmpdir, ignore_errors=True)
         if store.meta(job)["status"] == "running":
             store.update(job, status="failed", run_pid=None, run_pgid=None)
 

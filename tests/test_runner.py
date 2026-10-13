@@ -15,6 +15,22 @@ from xvendor.vendors.codex import CodexVendor
 needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
 
 
+@pytest.fixture(autouse=True)
+def codex_home(tmp_path, monkeypatch):
+    """Minimal ~/.codex and agy state so vendors pass isolation.check; without bwrap, wrap becomes a passthrough."""
+    home = tmp_path / "home"
+    (home / ".codex" / "hooks").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text("")
+    agy = home / ".gemini" / "antigravity-cli"
+    (agy / "bin").mkdir(parents=True)
+    (agy / "builtin").mkdir()
+    (agy / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    if sys.platform != "linux" or shutil.which("bwrap") is None:
+        monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir: list(argv))
+
+
 @pytest.fixture
 def store(tmp_path):
     return JobStore(tmp_path / "data")
@@ -61,7 +77,9 @@ def test_codex_done(store, tmp_path, env, fixture_path):
     assert (rd / "response.md").read_text(encoding="utf-8").startswith("### Data directory paths")
 
 
-def test_argv_reaches_cli(store, tmp_path, env, fixture_path):
+def test_argv_reaches_cli(store, tmp_path, env, fixture_path, monkeypatch):
+    # the fake writes argv.json outside the sandbox's writable dirs, so check argv without bwrap
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir: list(argv))
     job = new_job(store, tmp_path)
     out = tmp_path / "argv.json"
     runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"), XV_FAKE_ARGV_OUT=out))

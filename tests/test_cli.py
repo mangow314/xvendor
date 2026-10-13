@@ -27,7 +27,7 @@ def xv(data, fakes_dir, fixture_path, tmp_path):
 
     def run(*args, **env):
         e = {**base, **{k: str(v) for k, v in env.items()}}
-        return subprocess.run(["xv", *args], capture_output=True, text=True, env=e, cwd=tmp_path, timeout=60)
+        return subprocess.run([sys.executable, "-m", "xvendor", *args], capture_output=True, text=True, env=e, cwd=tmp_path, timeout=60)
     return run
 
 
@@ -200,3 +200,12 @@ def test_erofs_hint(monkeypatch, capsys, tmp_path):
     assert exc.value.code == 1
     err = capsys.readouterr().err
     assert err.startswith("xv: ") and "excludedCommands" in err
+
+
+def test_run_scrubs_env(xv, tmp_path):
+    out = tmp_path / "env.txt"
+    job = start(xv, XV_FAKE_ENV_OUT=out, XV_PROBE_TOKEN="1")
+    assert xv("wait", job).returncode == 0
+    names = {line.split("=", 1)[0] for line in out.read_text(encoding="utf-8").splitlines()}
+    assert "XV_PROBE_TOKEN" not in names
+    assert "PATH" in names

@@ -227,7 +227,8 @@ def cmd_run(store: JobStore, args) -> int:
     display.header(meta["vendor"], job, n, meta["timeout"])
     rc = 0
     try:
-        runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event)
+        runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event,
+                         popen_env=runner.scrub_env(os.environ))
         _finish(display, store, job, n)
     except Exception as e:  # runner already marked the job failed; keep the message visible
         print(f"xv: _run failed: {e}", file=sys.stderr)

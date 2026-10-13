@@ -1,11 +1,12 @@
 import os
+import re
 import shutil
 import signal
 import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from xvendor.events import Event
@@ -14,6 +15,14 @@ from xvendor.jobs import JobError, JobStore
 from xvendor.vendors.base import Vendor
 
 KILL_GRACE = 10  # seconds between SIGTERM and SIGKILL, like `timeout -k 10`
+SECRET_ENV = re.compile(r"(?i)key|token|secret|passw|cred|auth")
+KEEP_ENV = ("XV_DATA", "XV_PANE", "CODEX_HOME", "PATH", "HOME", "TMPDIR", "TERM", "LANG", "TMUX", "TMUX_PANE")
+
+
+def scrub_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Drop variables whose name looks like a credential; vendors log in through files, not env."""
+    return {k: v for k, v in environ.items()
+            if k in KEEP_ENV or k.startswith("LC_") or not SECRET_ENV.search(k)}
 
 
 def _killpg(pgid: int, sig: int) -> None:

@@ -161,3 +161,10 @@ def test_stop_rejects_missing_pgid(store, tmp_path):
     job = new_job(store, tmp_path)
     with pytest.raises(JobError, match="try again"):
         runner.stop(store, job)
+
+
+def test_scrub_env():
+    environ = {"PATH": "/x", "JINA_API_KEY": "a", "CLOUDSDK_PROXY_PASSWORD": "b", "GITHUB_TOKEN": "c",
+               "AWS_SECRET_ACCESS_KEY": "d", "MY_CREDENTIALS": "e", "OAUTH_THING": "f", "XV_DATA": "/d",
+               "CODEX_HOME": "/c", "LC_ALL": "C", "EDITOR": "nvim"}
+    assert set(runner.scrub_env(environ)) == {"PATH", "XV_DATA", "CODEX_HOME", "LC_ALL", "EDITOR"}

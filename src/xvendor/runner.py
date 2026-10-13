@@ -20,9 +20,14 @@ KEEP_ENV = ("XV_DATA", "XV_PANE", "CODEX_HOME", "PATH", "HOME", "TMPDIR", "TERM"
 
 
 def scrub_env(environ: Mapping[str, str]) -> dict[str, str]:
-    """Drop variables whose name looks like a credential; vendors log in through files, not env."""
+    """Drop variables whose name looks like a credential; vendors log in through files, not env.
+
+    The GIT_CONFIG_* family goes as a whole: dropping only GIT_CONFIG_KEY_n leaves
+    GIT_CONFIG_COUNT behind and git then refuses to run (rc 128).
+    """
     return {k: v for k, v in environ.items()
-            if k in KEEP_ENV or k.startswith("LC_") or not SECRET_ENV.search(k)}
+            if not k.startswith("GIT_CONFIG_")
+            and (k in KEEP_ENV or k.startswith("LC_") or not SECRET_ENV.search(k))}
 
 
 def _killpg(pgid: int, sig: int) -> None:

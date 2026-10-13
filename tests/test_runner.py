@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -186,3 +187,19 @@ def test_scrub_env():
                "AWS_SECRET_ACCESS_KEY": "d", "MY_CREDENTIALS": "e", "OAUTH_THING": "f", "XV_DATA": "/d",
                "CODEX_HOME": "/c", "LC_ALL": "C", "EDITOR": "nvim"}
     assert set(runner.scrub_env(environ)) == {"PATH", "XV_DATA", "CODEX_HOME", "LC_ALL", "EDITOR"}
+
+
+def test_scrub_env_drops_git_config_family():
+    environ = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "1",
+               "GIT_CONFIG_PARAMETERS": "'a.b=1'", "PATH": "/x", "GIT_EDITOR": "true"}
+    out = runner.scrub_env(environ)
+    assert not any(k.startswith("GIT_CONFIG_") for k in out)
+    assert {"PATH", "GIT_EDITOR"} <= set(out)
+
+    if not shutil.which("git"):
+        pytest.skip("git not installed")
+    env = runner.scrub_env({**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "x.y",
+                            "GIT_CONFIG_VALUE_0": "1"})
+    r = subprocess.run(["git", "status", "--short"], env=env, cwd=os.path.dirname(__file__),
+                       capture_output=True)
+    assert r.returncode == 0

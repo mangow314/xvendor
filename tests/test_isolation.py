@@ -218,6 +218,7 @@ def test_seatbelt_agy_layout(tmp_path, monkeypatch):
     assert params[str(home / ".gemini" / "oauth_creds.json")][0].startswith("S")
     assert profile.index("(deny file-write*)") < profile.index("(allow file-write*") < profile.index('(param "R0")')
     assert "(deny network-outbound (remote unix-socket))" in profile
+    assert "(deny appleevent-send)" in profile
     fake = tmp / "home"
     assert argv[argv.index("--") + 1:] == ["/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE", f"TMPDIR={tmp}",
                                            f"HOME={fake}", "agy", "-p", "hi"]

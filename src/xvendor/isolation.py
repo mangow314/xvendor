@@ -395,6 +395,9 @@ def _seatbelt(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_
     rules += ["(deny network-outbound (remote unix-socket))",
               f"(allow network-outbound {sockets} {refs('U', allow, '(remote unix-socket {})')})",
               "(deny mach-lookup " + " ".join(f'(global-name "{n}")' for n in MACH_DENY) + ")",
+              # osascript reached Finder with only the mach-lookup deny (measured 2026-10-15): AppleEvents are their
+              # own Seatbelt operation
+              "(deny appleevent-send)",
               # no pid namespace here: at least keep the vendor away from processes outside its sandbox
               "(deny signal)", "(allow signal (target same-sandbox))",
               "(deny process-info*)", "(allow process-info* (target same-sandbox))"]

@@ -57,6 +57,8 @@ attempt("dns", lambda: socket.getaddrinfo("example.com", 443))
 attempt("signal_parent", lambda: os.kill(spec["outside_pid"], 0))
 r = subprocess.run(["/usr/bin/osascript", "-e", 'tell application "Finder" to get name'], capture_output=True, text=True)
 out["osascript"] = "ok" if r.returncode == 0 else f"rc={r.returncode} {r.stderr.strip()[:120]}"
+r = subprocess.run(["/usr/bin/open", "-g", "-R", spec["reveal"]], capture_output=True, text=True)
+out["open_finder"] = "ok" if r.returncode == 0 else f"rc={r.returncode} {r.stderr.strip()[:120]}"
 try:  # ps is setuid root; the sandbox may refuse to exec it at all
     r = subprocess.run(["/bin/ps", "-p", str(spec["outside_pid"])], capture_output=True, text=True)
     out["ps_outside"] = "ok" if str(spec["outside_pid"]) in r.stdout else "hidden"
@@ -124,12 +126,12 @@ def part1() -> None:
                        "create_in_fake_bin": str(fake_bin / "xv-smoke"),
                        "create_in_conversations": str(agy / "conversations" / f"xv-smoke-{os.getpid()}"),
                        "create_in_tmpdir": str(tmp / "x")},
-            "read": secrets, "socket": sockets()}, tmp)
+            "read": secrets, "socket": sockets(), "reveal": str(tmp)}, tmp)
         if got:
             report(got["home"] == str(tmp / "home"), "agy: HOME is the fake home", got["home"])
             report(got["tmux"] is None, "agy: TMUX unset")
         for name in ("write_real_settings", "write_real_agentapi", "create_outside_home", "create_in_real_bin",
-                     "create_in_real_builtin", *secrets, *sockets(), "signal_parent", "osascript"):
+                     "create_in_real_builtin", *secrets, *sockets(), "signal_parent", "osascript", "open_finder"):
             expect("agy", got, name, False)
         for name in ("create_in_fake_bin", "create_in_conversations", "create_in_tmpdir", "dns"):
             expect("agy", got, name, True)

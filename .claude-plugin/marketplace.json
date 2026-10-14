@@ -4,13 +4,13 @@
     "name": "Mango"
   },
   "metadata": {
-    "description": "xv: read-only cross-vendor jobs (codex, agy) from Claude Code."
+    "description": "xv: cross-vendor jobs (codex, agy) from Claude Code, read-only or confined to one worktree."
   },
   "plugins": [
     {
       "name": "xvendor",
       "source": "./",
-      "description": "A skill that teaches Claude Code to send read-only review and research jobs to codex and agy with xv."
+      "description": "A skill that teaches Claude Code to send read-only review and research jobs to codex and agy with xv, or let them edit one worktree with --write."
     }
   ]
 }

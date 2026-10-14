@@ -1,7 +1,7 @@
 {
   "name": "xvendor",
-  "version": "0.2.0",
-  "description": "A skill that teaches Claude Code to use xv: send read-only review and research jobs to codex and agy, follow along in a tmux pane, and read the result from a job directory. Needs the xv command (uv tool install).",
+  "version": "0.2.1",
+  "description": "A skill that teaches Claude Code to use xv: send read-only review and research jobs to codex and agy (or, with --write, let them edit one worktree), follow along in a tmux pane, and read the result from a job directory. Needs the xv command (uv tool install).",
   "author": {
     "name": "Mango"
   },

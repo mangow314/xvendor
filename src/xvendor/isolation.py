@@ -55,8 +55,8 @@ def check(vendor: str) -> None:
         raise UnsupportedPlatform(f"{vendor} needs bubblewrap (bwrap) for read-only isolation; bwrap not found")
 
 
-def _hide_secrets(home: Path, own_state: Path | None) -> list[str]:
-    """bwrap args masking SECRET_PATHS / SECRET_GLOBS under home, skipping anything inside own_state."""
+def _secret_items(home: Path, own_state: Path | None) -> list[tuple[Path, list[str]]]:
+    """(path, bwrap args) masking SECRET_PATHS / SECRET_GLOBS under home, skipping anything inside own_state."""
     out = []
     paths = [home / rel for rel in SECRET_PATHS]
     for pattern in SECRET_GLOBS:
@@ -65,10 +65,37 @@ def _hide_secrets(home: Path, own_state: Path | None) -> list[str]:
         if own_state is not None and p.is_relative_to(own_state):
             continue
         if p.is_dir():
-            out += ["--tmpfs", str(p)]
+            out.append((p, ["--tmpfs", str(p)]))
         elif p.is_file():
-            out += ["--ro-bind", "/dev/null", str(p)]
+            out.append((p, ["--ro-bind", "/dev/null", str(p)]))
     return out
+
+
+def _hide_secrets(home: Path, own_state: Path | None) -> list[str]:
+    """bwrap args masking SECRET_PATHS / SECRET_GLOBS under home, skipping anything inside own_state."""
+    return [a for _, args in _secret_items(home, own_state) for a in args]
+
+
+def writable_overlaps_hidden(home: Path, writable: Path, own_state: Path) -> str | None:
+    """The path that writable (already resolved) equals or sits under among own_state and the paths xv hides
+    from the vendor, or None."""
+    if writable.is_relative_to(own_state):
+        return str(own_state)
+    for rel in SECRET_PATHS:
+        if writable.is_relative_to(home / rel):
+            return str(home / rel)
+    for pattern in SECRET_GLOBS:
+        for p in home.glob(pattern):
+            if writable.is_relative_to(p):
+                return str(p)
+    return None
+
+
+def state_dir(vendor: str) -> Path:
+    """The vendor's own writable state dir."""
+    if vendor == "codex":
+        return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    return Path.home() / ".gemini" / "antigravity-cli"
 
 
 def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = None) -> list[str]:
@@ -79,23 +106,36 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
         if sys.platform != "linux":
             print(f"xv: codex runs without xv isolation on {sys.platform}", file=sys.stderr)
             return list(argv)
-        state = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        state = state_dir("codex")
         protect = list(CODEX_STATE_READONLY)
         extra = sorted(p.name for p in state.glob("*.config.toml")) if state.is_dir() else []
         return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state, writable)
-    state = Path.home() / ".gemini" / "antigravity-cli"
+    state = state_dir("agy")
     return _bwrap("agy", argv, tmpdir, state, STATE_READONLY, STATE_READONLY, state, writable)
 
 
-def _worktree_gitdir(writable: Path) -> list[Path]:
-    """The gitdir a linked worktree's .git file points at (its index lives there); [] for a normal repo."""
+def linked_worktree_gitdir(writable: Path) -> Path:
+    """The gitdir of the linked worktree at writable (its index lives there). Raise ValueError unless writable/.git
+    is a pointer file to <repo>/.git/worktrees/<name> whose commondir leads back to <repo>/.git."""
+    def bad(why: str) -> ValueError:
+        return ValueError(f"--write needs a linked worktree (git worktree add): {why}")
     dotgit = writable / ".git"
     if not dotgit.is_file():
-        return []
+        raise bad(f"{dotgit} is not a worktree pointer")
     text = dotgit.read_text(encoding="utf-8", errors="replace").strip()
-    if not text.startswith("gitdir: "):
-        return []
-    return [(writable / text.removeprefix("gitdir: ").strip()).resolve()]
+    if not text.startswith("gitdir:"):
+        raise bad(f"{dotgit} has no gitdir line")
+    gitdir = (writable / text.removeprefix("gitdir:").strip()).resolve()
+    if not gitdir.is_dir():
+        raise bad(f"{dotgit} points at {gitdir}, which is not a directory")
+    if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
+        raise bad(f"{gitdir} is not under <repo>/.git/worktrees/")
+    commondir = gitdir / "commondir"
+    if not commondir.is_file():
+        raise bad(f"{commondir} is missing")
+    if (gitdir / commondir.read_text(encoding="utf-8", errors="replace").strip()).resolve() != gitdir.parent.parent:
+        raise bad(f"{commondir} does not lead back to {gitdir.parent.parent}")
+    return gitdir
 
 
 def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_entries, required_entries,
@@ -121,7 +161,13 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
         hide += ["--tmpfs", d]
     # the vendor reads whatever it is told to (web pages can carry injected instructions), and what it
     # reads can leave with the conversation: blank out credentials. Placed before the --bind entries below.
-    hide += _hide_secrets(Path.home(), own_state)
+    # secrets that sit inside the writable dir (a worktree under ~/projects/<x>/) are masked after the --bind below
+    hide_after = []
+    for path, args in _secret_items(Path.home(), own_state):
+        if writable is not None and path.is_relative_to(writable):
+            hide_after += args
+        else:
+            hide += args
     # Inside the writable state dir, re-protect what a later unsandboxed run would load or execute.
     protect = []
     for rel in readonly_entries:
@@ -136,8 +182,16 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
     tmp = str(tmpdir)
     write = []
     if writable is not None:
-        for d in (writable, *_worktree_gitdir(writable)):
+        # F2: the vendor must not rewrite the .git pointer / commondir to aim the worktree at a git dir of its own
+        # (core.fsmonitor and friends would then run on the host's next git command), so those stay read-only
+        # inside the writable dirs; the --ro-bind entries have to come after both --bind entries.
+        gitdir = linked_worktree_gitdir(writable)
+        for d in (writable, gitdir):
             write += ["--bind", str(d), str(d)]
+        for f in (writable / ".git", gitdir / "commondir", gitdir / "gitdir", gitdir / "config.worktree"):
+            if f.is_file():
+                write += ["--ro-bind", str(f), str(f)]
+        write += hide_after
     return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", *hide,
             "--bind", str(state), str(state), *protect, *write, "--bind", tmp, tmp, "--setenv", "TMPDIR", tmp,
             "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--die-with-parent", "--", *argv]

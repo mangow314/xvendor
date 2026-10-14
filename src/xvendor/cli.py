@@ -108,9 +108,13 @@ def cmd_start(store: JobStore, args) -> int:
     if args.write is not None:
         if not Path(args.write).is_dir():
             raise Fail(f"--write does not exist: {args.write}")
-        if (Path(args.write) / ".git").is_dir():
-            raise Fail(f"--write refuses a repository root ({args.write}/.git is a directory): use a linked worktree, e.g. git worktree add <dir> -b <branch>")
+        try:
+            isolation.linked_worktree_gitdir(Path(args.write))
+        except ValueError as e:
+            raise Fail(str(e)) from None
         writable = Path(args.write).resolve()
+        if hit := isolation.writable_overlaps_hidden(Path.home(), writable, isolation.state_dir(args.vendor)):
+            raise Fail(f"--write refuses {writable}: it is under {hit}, which xv hides from the vendor")
     cwd = Path(args.cwd or writable or os.getcwd())
     if not cwd.is_dir():
         raise Fail(f"--cwd does not exist: {args.cwd}")
@@ -145,6 +149,8 @@ def cmd_ask(store: JobStore, args) -> int:
         raise Fail(f"job is still running; run xv wait {job} first")
     if not meta["session"]:
         raise Fail("job has no session id (the last round may have failed), so it cannot be asked again; start a new job")
+    if meta.get("mode", "read") == "write" and (busy := store.running_writable(meta["writable"])):
+        raise Fail(f"another job is still writing {meta['writable']}: {busy}")
     n = store.new_round(job, req)
     if args.timeout is not None:
         store.update(job, timeout=args.timeout)

@@ -343,34 +343,82 @@ def test_real_bwrap_agy_keeps_own_token(tmp_path_factory, monkeypatch):
 
 # --write
 
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+
+
+def make_worktree(base: Path, name="wt") -> tuple[Path, Path]:
+    """A repo main/ with one commit and a linked worktree base/<name>; returns (worktree, its gitdir)."""
+    main, wt = base / "main", base / name
+    ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
+    subprocess.run(["git", "init", "-q", str(main)], check=True)
+    (main / "a.txt").write_text("a\n")
+    subprocess.run(["git", "-C", str(main), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(main), *ident, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", f"../{name}", "-b", f"lane-{name}"], check=True)
+    return wt, main / ".git" / "worktrees" / name
+
+
+def seq_at(argv, *seq):
+    return [i for i in range(len(argv)) if argv[i:i + len(seq)] == list(seq)]
+
+
+@needs_git
 def test_write_argv_binds_dir(tmp_path, monkeypatch):
     home, state = fake_codex_home(tmp_path, monkeypatch)
-    work = tmp_path / "work"
-    work.mkdir()
-    argv = wrap("codex", ["codex", "exec", "hi"], tmp_path / "t", work)
-    seq = ["--bind", str(work), str(work)]
-    at = [i for i in range(len(argv)) if argv[i:i + 3] == seq]
+    wt, gitdir = make_worktree(tmp_path)
+    argv = wrap("codex", ["codex", "exec", "hi"], tmp_path / "t", wt)
+    at = seq_at(argv, "--bind", str(wt), str(wt))
     assert len(at) == 1
     assert at[0] > argv.index(str(state))
     assert at[0] < argv.index(str(tmp_path / "t"))
     assert wrap("codex", ["codex"], tmp_path / "t").count("--bind") == 2  # state + tmp only
 
 
+@needs_git
 def test_write_argv_binds_worktree_gitdir(tmp_path, monkeypatch):
     fake_codex_home(tmp_path, monkeypatch)
-    wt = tmp_path / "wt"
-    wt.mkdir()
-    gitdir = tmp_path / "main" / ".git" / "worktrees" / "wt"
-    gitdir.mkdir(parents=True)
-    (wt / ".git").write_text("gitdir: ../main/.git/worktrees/wt\n")
+    wt, gitdir = make_worktree(tmp_path)
     argv = wrap("codex", ["codex"], tmp_path / "t", wt)
-    assert any(argv[i:i + 3] == ["--bind", str(gitdir), str(gitdir)] for i in range(len(argv)))
+    gd = seq_at(argv, "--bind", str(gitdir), str(gitdir))
+    assert len(gd) == 1
     assert not any(a == str(tmp_path / "main" / ".git" / "objects") for a in argv)
+    for f in (wt / ".git", gitdir / "commondir", gitdir / "gitdir"):
+        ro = seq_at(argv, "--ro-bind", str(f), str(f))
+        assert len(ro) == 1 and ro[0] > gd[0] and ro[0] > seq_at(argv, "--bind", str(wt), str(wt))[0]
+    assert not seq_at(argv, "--ro-bind", str(gitdir / "config.worktree"), str(gitdir / "config.worktree"))  # absent
+    print(argv)
+
+
+@needs_git
+def test_linked_worktree_gitdir_ok_and_refusals(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
+    subprocess.run(["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")],
+                   check=True)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    for bad in (tmp_path / "sepwt", plain, tmp_path / "main"):
+        with pytest.raises(ValueError, match="git worktree add"):
+            isolation.linked_worktree_gitdir(bad)
+
+
+def test_writable_overlaps_hidden(tmp_path):
+    home = tmp_path / "home"
+    own = home / ".codex"
+    for d in (own / "x", home / ".ssh" / "y", home / "projects" / "demo" / "wt", home / "ok"):
+        d.mkdir(parents=True)
+    (home / "projects" / "demo" / ".env").write_text("S=1")
+    assert isolation.writable_overlaps_hidden(home, own / "x", own) == str(own)
+    assert isolation.writable_overlaps_hidden(home, home / ".ssh" / "y", own) == str(home / ".ssh")
+    assert isolation.writable_overlaps_hidden(home, home / "projects" / "demo" / "wt", own) is None
+    assert isolation.writable_overlaps_hidden(home, home / "ok", own) is None
 
 
 @needs_bwrap
+@needs_git
 def test_real_bwrap_write_dir_only(tmp_path_factory):
-    work = tmp_path_factory.mktemp("work")
+    base = tmp_path_factory.mktemp("repo")
+    work, _ = make_worktree(base)
     outside = tmp_path_factory.mktemp("outside")
     tmp = tmp_path_factory.mktemp("agytmp")
     proc = subprocess.run(wrap("agy", probe(work / "xv-probe"), tmp, work), capture_output=True, text=True, timeout=30)
@@ -383,16 +431,11 @@ def test_real_bwrap_write_dir_only(tmp_path_factory):
 
 
 @needs_bwrap
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@needs_git
 def test_real_bwrap_worktree_status_ok_commit_denied(tmp_path_factory, monkeypatch):
     base = tmp_path_factory.mktemp("repo")
-    main, wt = base / "main", base / "wt"
-    ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
-    subprocess.run(["git", "init", "-q", str(main)], check=True)
-    (main / "a.txt").write_text("a\n")
-    subprocess.run(["git", "-C", str(main), "add", "a.txt"], check=True)
-    subprocess.run(["git", "-C", str(main), *ident, "commit", "-q", "-m", "init"], check=True)
-    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "../wt", "-b", "lane"], check=True)
+    wt, _ = make_worktree(base)
+    main = base / "main"
     _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
     g = "git -c safe.directory='*'"
     script = (f"cd {base}\n"
@@ -417,3 +460,41 @@ def test_real_bwrap_worktree_status_ok_commit_denied(tmp_path_factory, monkeypat
     assert "?? hello.txt" in host.stdout
     log = subprocess.run(["git", "-C", str(main), "log", "--oneline"], capture_output=True, text=True, check=True)
     assert len(log.stdout.splitlines()) == 1
+
+
+@needs_bwrap
+@needs_git
+def test_real_bwrap_worktree_pointers_readonly(tmp_path_factory, monkeypatch):
+    base = tmp_path_factory.mktemp("repo")
+    wt, gitdir = make_worktree(base)
+    _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
+    pointer = (wt / ".git").read_text()
+    commondir = (gitdir / "commondir").read_text()
+    script = (f"echo x > {wt}/.git 2>/dev/null; echo dotgit=$?\n"
+              f"echo x > {gitdir}/commondir 2>/dev/null; echo commondir=$?\n"
+              f"touch {gitdir}/xv-index-probe; echo probe=$?\n"
+              f"git -c safe.directory='*' -C {wt} status --porcelain >/dev/null 2>&1; echo status=$?\n")
+    proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
+    rc = dict(l.split("=", 1) for l in proc.stdout.splitlines() if "=" in l)
+    assert rc["dotgit"] != "0" and rc["commondir"] != "0", proc.stdout
+    assert rc["probe"] == "0" and rc["status"] == "0", proc.stdout
+    assert (wt / ".git").read_text() == pointer and (gitdir / "commondir").read_text() == commondir
+
+
+@needs_bwrap
+@needs_git
+def test_real_bwrap_write_dir_keeps_env_hidden(tmp_path_factory, monkeypatch):
+    _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
+    home = Path(os.environ["HOME"])
+    (home / "projects").mkdir()
+    repo = home / "projects" / "demo"
+    repo.mkdir()
+    wt, _ = make_worktree(home / "projects", "demo-wt")
+    (wt / ".env").write_text("SECRET=1")
+    script = (f"cat {wt}/.env 2>/dev/null; echo cat=$?\n"
+              f"echo hi > {wt}/other.txt; echo write=$?\n")
+    proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
+    assert "SECRET" not in proc.stdout, proc.stdout
+    assert "write=0" in proc.stdout, proc.stdout
+    assert (wt / "other.txt").read_text() == "hi\n"
+    assert (wt / ".env").read_text() == "SECRET=1"

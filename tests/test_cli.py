@@ -39,6 +39,17 @@ def xv(data, fakes_dir, fixture_path, tmp_path):
     return run
 
 
+def make_worktree(tmp_path, name="wt"):
+    main = tmp_path / f"main-{name}"
+    ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
+    subprocess.run(["git", "init", "-q", str(main)], check=True)
+    (main / "a.txt").write_text("a\n")
+    subprocess.run(["git", "-C", str(main), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(main), *ident, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", f"../{name}", "-b", f"lane-{name}"], check=True)
+    return tmp_path / name
+
+
 def start(xv, vendor="codex", **env):
     proc = xv("start", vendor, "-m", "question", "--no-pane", **env)
     assert proc.returncode == 0, proc.stderr
@@ -158,8 +169,7 @@ def test_list_format(xv):
 
 
 def test_start_write_sets_meta(xv, data, tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
+    work = make_worktree(tmp_path)
     proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", work)
     assert proc.returncode == 0, proc.stderr
     meta = json.loads((data / "jobs" / proc.stdout.strip() / "meta.json").read_text())
@@ -169,8 +179,7 @@ def test_start_write_sets_meta(xv, data, tmp_path):
 
 
 def test_start_write_refuses_second_writer(xv, tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
+    work = make_worktree(tmp_path)
     first = xv("start", "codex", "-m", "q", "--no-pane", "--write", work, XV_FAKE_DELAY=30)
     assert first.returncode == 0, first.stderr
     second = xv("start", "codex", "-m", "q", "--no-pane", "--write", work)
@@ -182,7 +191,7 @@ def test_start_write_refuses_second_writer(xv, tmp_path):
 def test_ask_rejects_write(xv, tmp_path):
     job = start(xv)
     xv("wait", job)
-    proc = xv("ask", job, "-m", "again", "--write", tmp_path)
+    proc = xv("ask", job, "-m", "again", "--write", make_worktree(tmp_path))
     assert proc.returncode == 2
     assert "ask only takes" in proc.stderr
 
@@ -199,6 +208,43 @@ def test_start_write_refuses_git_dir(xv, tmp_path):
     proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", repo)
     assert proc.returncode == 2
     assert "git worktree add" in proc.stderr
+
+
+def test_start_write_refuses_separate_git_dir(xv, tmp_path):
+    subprocess.run(["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")],
+                   check=True)
+    proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "sepwt")
+    assert proc.returncode == 2
+    assert "git worktree add" in proc.stderr
+
+
+def test_start_write_refuses_plain_dir(xv, tmp_path):
+    (tmp_path / "plain").mkdir()
+    proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "plain")
+    assert proc.returncode == 2
+    assert "git worktree add" in proc.stderr
+
+
+def test_start_write_refuses_hidden_or_state_dir(xv, tmp_path):
+    for rel in (".codex", ".ssh"):
+        base = tmp_path / "home" / rel
+        base.mkdir(parents=True, exist_ok=True)
+        d = make_worktree(base)
+        proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", d)
+        assert proc.returncode == 2, proc.stderr
+        assert "hides" in proc.stderr
+
+
+def test_ask_refuses_when_other_writer_running(xv, tmp_path):
+    wt = make_worktree(tmp_path)
+    a = xv("start", "codex", "-m", "q", "--no-pane", "--write", wt).stdout.strip()
+    assert xv("wait", a).returncode == 0
+    b = xv("start", "codex", "-m", "q", "--no-pane", "--write", wt, XV_FAKE_DELAY=30)
+    assert b.returncode == 0, b.stderr
+    proc = xv("ask", a, "-m", "x")
+    assert proc.returncode == 2
+    assert "another job is still writing" in proc.stderr
+    xv("stop", b.stdout.strip())
 
 
 def test_list_empty(xv):

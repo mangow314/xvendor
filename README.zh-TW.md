@@ -100,7 +100,7 @@ ignore_default_excludes = false
 exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
 ```
 
-**寫入模式。** `--write DIR` 讓廠商只能寫 `DIR`（`--cwd` 預設為 `DIR`），其餘仍是唯讀。請用 git worktree。廠商能執行 `git status`、`git diff`，不能 `git add`、`git commit`。round 進行中你自己不要碰 `DIR`。`xv wait` 回來後，用 `git -C DIR diff` 審，再自己 commit、merge。同一個 `DIR` 同時只能有一個寫入 job；第二次 `xv start` 會被拒絕。`ask` 沿用 `start` 設的寫入目錄。
+**寫入模式。** `--write DIR` 讓廠商只能寫 `DIR`（`--cwd` 預設為 `DIR`），其餘仍是唯讀。請用 git worktree。廠商能執行 `git status`、`git diff`，不能 `git add`、`git commit`。round 進行中你自己不要碰 `DIR`。`xv wait` 回來後，用 `git -C DIR diff` 審，再自己 commit、merge。同一個 `DIR` 同時只能有一個寫入 job；第二次 `xv start` 會被拒絕。`ask` 沿用 `start` 設的寫入目錄。round 結束、你 commit／merge 之後，請執行 `git worktree remove <dir>`（必要時再 `git branch -d`），清掉不再使用的 worktree，避免孤兒 worktree 累積。
 
 `<job>` 可以給完整 id 或末 4 碼。每一輪有逾時（`start` 的 `--timeout`，預設 1200 秒；`ask` 沿用 job 的逾時，除非另外指定）。job 存在 `~/.local/share/xvendor/jobs/<job-id>/`（設 `XV_DATA` 可改位置，須是只含英數字、`/`、`.`、`_`、`-` 的絕對路徑），每一輪一個資料夾，內有 `request.md`、`events.jsonl`、`response.md`、`stderr.log`。
 

@@ -19,7 +19,7 @@ Three ways to use it:
 
 - **review** (read-only; the default): `xv start codex --profile xv-review --file brief.md` and `xv start agy --file brief.md`. The `xv-review` codex profile turns off web search and the GitHub connector.
 - **survey** (read-only, web research): `xv start codex --profile xv-survey --cwd <clean dir> -m "..."`. The `xv-survey` profile allows cached web search. The pages it reads are an injection source, so give it a `--cwd` with no secrets in it, never a project directory that holds credentials.
-- **write** (the other model edits files in one worktree): `xv start <vendor> --write <worktree> --file brief.md`. The vendor can write only inside that worktree (default `--cwd` is the worktree). It can run `git status` and `git diff`, but not `git add` or `git commit`.
+- **write** (the other model edits files in one worktree): `xv start <vendor> --write <worktree> --file brief.md`. The vendor can write only inside that worktree (default `--cwd` is the worktree). It can run `git status` and `git diff`, but not `git add` or `git commit`. After the round ends and you have committed or merged, run `git worktree remove <dir>` (and `git branch -d` if needed) so unused worktrees do not pile up as orphans.
   - **Do not touch that worktree from the main thread while a round is running.**
   - After `xv wait` returns, review with `git -C <worktree> diff`; the main thread commits, and the main thread merges (or opens a PR, following the repo's habit).
   - Only one writing job may use a given worktree at a time; `xv start` refuses a second.

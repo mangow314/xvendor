@@ -132,6 +132,9 @@ or `git commit`. Do not touch `DIR` yourself while a round is running. When
 `xv wait` returns, review with `git -C DIR diff`, then commit and merge
 yourself. Only one job at a time may write a given `DIR`; a second
 `xv start` is refused. `ask` keeps the write directory set by `start`.
+Once a round is over and you have committed or merged, run
+`git worktree remove <dir>` (and `git branch -d` if needed) so unused
+worktrees do not pile up as orphans.
 
 `<job>` can be the full id or its last 4 characters. Each round has a
 timeout (`--timeout` on `start`, default 1200 seconds; `ask` keeps the

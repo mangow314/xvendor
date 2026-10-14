@@ -143,6 +143,8 @@ def cmd_start(store: JobStore, args) -> int:
     job = store.create(args.vendor, str(cwd.resolve()), args.timeout, args.no_pane, args.profile, req,
                        str(writable) if writable else None)
     panes.launch(store, job, 1)
+    if args.no_pane or not panes.in_tmux():
+        print(f"xv: no pane; follow with: xv watch {job}", file=sys.stderr)
     print(job)
     return 0
 

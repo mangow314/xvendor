@@ -58,6 +58,13 @@ def start(xv, vendor="codex", **env):
     return job
 
 
+def test_start_without_pane_hints_watch(xv):
+    proc = xv("start", "codex", "-m", "q", "--no-pane")
+    job = proc.stdout.strip()
+    assert JOB_ID_RE.fullmatch(job)
+    assert f"xv watch {job}" in proc.stderr
+
+
 def test_start_wait_codex(xv):
     job = start(xv)
     proc = xv("wait", job)

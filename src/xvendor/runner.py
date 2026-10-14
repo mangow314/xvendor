@@ -53,8 +53,8 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     t0 = time.monotonic()
     try:
         writable = Path(meta["writable"]) if meta.get("writable") else None
-        built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
         try:
+            built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
             if meta.get("mode") == "write" and has_gitlinks(Path(meta["writable"])):
                 raise RuntimeError(f"{meta['writable']} now has submodule entries (gitlinks); refusing the write round")
             argv = wrap(vendor.name, built, tmpdir, writable)
@@ -121,7 +121,7 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
         if not final and store.meta(job)["status"] == "running":
             final = dict(status="failed", run_pid=None, run_pgid=None, error=None)
         if meta.get("mode") == "write":
-            final["nested_git"] = [str(p) for p in nested_git(Path(meta["writable"]))]
+            final["nested_git"] = nested_git(Path(meta["writable"]))
         if final:
             store.update(job, **final)
 

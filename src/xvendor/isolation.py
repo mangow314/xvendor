@@ -134,7 +134,17 @@ def _walk_symlinks_outside(start: Path, forbidden: Path) -> None:
     cur = Path(parts.pop(0))
     hops = 0
     while parts:
-        cur = cur / parts.pop(0)
+        part = parts.pop(0)
+        if part == ".":
+            continue
+        if part == "..":
+            cur = cur.parent   # cur is always a physical path here, so .parent is the real parent
+            if Path(os.path.realpath(cur)).is_relative_to(forbidden):
+                raise ValueError(f"{cur} lies inside {forbidden} on the gitdir path")
+            continue
+        cur = cur / part
+        if Path(os.path.realpath(cur)).is_relative_to(forbidden):
+            raise ValueError(f"{cur} lies inside {forbidden} on the gitdir path")   # real dir or symlink alike
         while cur.is_symlink():
             hops += 1
             if hops > 40:
@@ -148,11 +158,7 @@ def _walk_symlinks_outside(start: Path, forbidden: Path) -> None:
             else:
                 parts = list(Path(target).parts) + parts
                 cur = cur.parent
-            # normalise: a leading ".." in parts pops cur
-            while parts and parts[0] in (".", ".."):
-                p = parts.pop(0)
-                if p == "..":
-                    cur = cur.parent
+            break   # the pushed-back parts are consumed by the outer loop
 
 
 def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Path:
@@ -210,20 +216,20 @@ def has_gitlinks(writable: Path) -> bool:
     return any(line.startswith("160000 ") for line in ls.stdout.splitlines())
 
 
-def nested_git(writable: Path) -> list[Path]:
+def nested_git(writable: Path) -> list[str]:
     """Every .git directory or file under writable other than writable/.git itself (sorted), plus directories
     that could not be entered. Does not descend into a .git directory and does not follow symlinks."""
     top = writable / ".git"
-    found = []
+    found: list[str] = []
     errs: list[OSError] = []
     for root, dirs, files in os.walk(writable, followlinks=False, onerror=errs.append):
         for d in list(dirs):
             if d == ".git":
                 dirs.remove(d)
                 if Path(root) / d != top:
-                    found.append(Path(root) / d)
-        found += [Path(root) / f for f in files if f == ".git" and Path(root) / f != top]
-    found += [Path(e.filename) for e in errs if e.filename]
+                    found.append(str(Path(root) / d))
+        found += [str(Path(root) / f) for f in files if f == ".git" and Path(root) / f != top]
+    found += [f"{e.filename} (could not be entered)" for e in errs if e.filename]
     return sorted(found)
 
 

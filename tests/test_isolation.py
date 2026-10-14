@@ -575,7 +575,7 @@ def test_nested_git_listed(tmp_path):
     (wt / "sub" / ".git" / "x" / ".git").mkdir(parents=True)
     (wt / "deep" / "mod").mkdir(parents=True)
     (wt / "deep" / "mod" / ".git").write_text("gitdir: elsewhere\n")
-    assert isolation.nested_git(wt) == [wt / "deep" / "mod" / ".git", wt / "sub" / ".git"]
+    assert isolation.nested_git(wt) == [str(wt / "deep" / "mod" / ".git"), str(wt / "sub" / ".git")]
 
 
 @needs_git
@@ -584,7 +584,7 @@ def test_linked_worktree_rejects_symlink_in_pointer_path(tmp_path):
     original = (wt / ".git").read_text()
     os.symlink(gitdir.parent, wt / "link")
     (wt / ".git").write_text("gitdir: link/wt\n")
-    with pytest.raises(ValueError, match="symlink inside"):
+    with pytest.raises(ValueError, match="inside"):
         isolation.linked_worktree_gitdir(wt)
     (wt / ".git").write_text(original)
     assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
@@ -622,7 +622,7 @@ def test_linked_worktree_rejects_symlink_chain_into_dir(tmp_path):
     (tmp_path / "outside").mkdir()
     os.symlink(wt / "link", tmp_path / "outside" / "entry")
     (wt / ".git").write_text(f"gitdir: {tmp_path}/outside/entry/wt\n")
-    with pytest.raises(ValueError, match="symlink inside"):
+    with pytest.raises(ValueError, match="inside"):
         isolation.linked_worktree_gitdir(wt)
     os.symlink(gitdir.parent, tmp_path / "outside" / "direct")  # chain never passes through DIR
     (wt / ".git").write_text(f"gitdir: {tmp_path}/outside/direct/wt\n")
@@ -638,7 +638,7 @@ def test_linked_worktree_rejects_symlink_in_expanded_target(tmp_path):
     (tmp_path / "outside").mkdir()
     os.symlink(wt / "link" / "worktrees", tmp_path / "outside" / "entry")
     (wt / ".git").write_text(f"gitdir: {tmp_path}/outside/entry/wt\n")
-    with pytest.raises(ValueError, match="symlink inside"):
+    with pytest.raises(ValueError, match="inside"):
         isolation.linked_worktree_gitdir(wt)
     (tmp_path / "outside" / "entry").unlink()
     os.symlink(tmp_path / "main" / ".git" / "worktrees", tmp_path / "outside" / "entry")  # not via DIR
@@ -684,3 +684,41 @@ def test_real_bwrap_unshare_pid_kills_stragglers(tmp_path_factory, monkeypatch):
     subprocess.run(argv, capture_output=True, text=True, timeout=30)
     time.sleep(2)
     assert (wt / "late.txt").exists()
+
+
+@needs_git
+def test_walk_symlinks_dotdot_then_relative_link(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    os.symlink(tmp_path / "main" / ".git", wt / "link")
+    (tmp_path / "out" / "d").mkdir(parents=True)
+    os.symlink("../wt/link/worktrees", tmp_path / "out" / "s")
+    os.symlink("d/../s", tmp_path / "out" / "entry")
+    (wt / ".git").write_text(f"gitdir: {tmp_path}/out/entry/wt\n")
+    with pytest.raises(ValueError, match="inside"):
+        isolation.linked_worktree_gitdir(wt)
+
+
+@needs_git
+def test_walk_refuses_real_dir_inside_writable(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    (wt / "d").mkdir()
+    (tmp_path / "out").mkdir()
+    os.symlink("../wt/d/../../main/.git/worktrees", tmp_path / "out" / "pent")
+    (wt / ".git").write_text(f"gitdir: {tmp_path}/out/pent/wt\n")
+    with pytest.raises(ValueError, match="inside"):
+        isolation.linked_worktree_gitdir(wt)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can enter any directory")
+def test_nested_git_marks_unreadable(tmp_path):
+    wt = tmp_path / "wt"
+    (wt / ".git").mkdir(parents=True)
+    (wt / "ok" / ".git").mkdir(parents=True)
+    (wt / "locked").mkdir()
+    (wt / "locked").chmod(0o000)
+    try:
+        found = isolation.nested_git(wt)
+    finally:
+        (wt / "locked").chmod(0o755)
+    assert f"{wt / 'locked'} (could not be entered)" in found
+    assert str(wt / "ok" / ".git") in found

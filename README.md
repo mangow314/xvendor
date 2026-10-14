@@ -150,16 +150,16 @@ submodule directory, and your next `git diff` would run it. The vendor can still
 create a nested repository (`sub/.git/`) inside `DIR`. When a round ends `xv`
 lists every nested `.git` under `DIR` (and records them in the job's meta as
 `nested_git`; `xv wait` and `xv show` repeat the warning): delete them **before
-you run any git command in the worktree**. The list also names directories `xv`
-could not enter (`could not be entered`): the scan is incomplete there, so inspect
-that directory yourself; it is not an instruction to delete it. One exception comes from your own
+you run any git command in the worktree**. In that list, an entry marked `(could not be entered)` is a directory `xv`
+could not enter: the scan is incomplete there, so inspect that directory
+yourself; it is not an instruction to delete it. One exception comes from your own
 git config: if it runs a program from inside the worktree (`diff.<driver>.textconv`,
 `filter.<name>.clean`/`smudge`, `core.hooksPath` pointing into the worktree),
 the vendor can change that program and your next `git diff` or `git status`
 runs it. Do not touch `DIR` yourself while a round is running. When
 `xv wait` returns, check the nested-git warning, delete those entries, review
 with `git -C DIR diff`, then commit and merge yourself. Only one job at a time may write a given `DIR`; a second
-`xv start` is refused. `ask` keeps the write directory set by `start` and re-runs the same checks (a submodule added to the worktree later makes the next round fail).
+`xv start` is refused. `ask` keeps the write directory set by `start` and re-runs the worktree-layout and submodule checks (a submodule added to the worktree later makes the next round fail); the overlap check against hidden paths runs only at `start`, since `DIR` is fixed and the result cannot change.
 Once a round is over and you have committed or merged, run
 `git worktree remove <dir>` (and `git branch -d` if needed) so unused
 worktrees do not pile up as orphans.
@@ -187,6 +187,9 @@ bubblewrap (`bwrap`) layout:
   (gitlinks too), commit, switch branches, or change git config files. A program your own
   git config runs from inside the worktree (`textconv`, `filter`, `core.hooksPath`)
   is not covered; see Write mode.
+  Threat-model boundary: `xv` blocks what the vendor can do from inside `DIR`. A symlink you
+  created outside `DIR` that points back into it, or a vendor state directory and a repo placed
+  inside each other, is out of scope.
 - **Own pid namespace.** bwrap runs the vendor with `--unshare-pid`: when a round ends, background
   processes the vendor left behind (even ones started with `setsid`) are killed with it, and host
   processes are invisible to the vendor, so `/proc/<pid>/root` of a host process cannot be used.

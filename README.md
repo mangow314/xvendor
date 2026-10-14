@@ -150,7 +150,9 @@ submodule directory, and your next `git diff` would run it. The vendor can still
 create a nested repository (`sub/.git/`) inside `DIR`. When a round ends `xv`
 lists every nested `.git` under `DIR` (and records them in the job's meta as
 `nested_git`; `xv wait` and `xv show` repeat the warning): delete them **before
-you run any git command in the worktree**. One exception comes from your own
+you run any git command in the worktree**. The list also names directories `xv`
+could not enter (`could not be entered`): the scan is incomplete there, so inspect
+that directory yourself; it is not an instruction to delete it. One exception comes from your own
 git config: if it runs a program from inside the worktree (`diff.<driver>.textconv`,
 `filter.<name>.clean`/`smudge`, `core.hooksPath` pointing into the worktree),
 the vendor can change that program and your next `git diff` or `git status`

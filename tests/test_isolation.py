@@ -631,6 +631,33 @@ def test_linked_worktree_rejects_symlink_chain_into_dir(tmp_path):
 
 
 @needs_git
+def test_linked_worktree_rejects_symlink_in_expanded_target(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    original = (wt / ".git").read_text()
+    os.symlink(tmp_path / "main" / ".git", wt / "link")
+    (tmp_path / "outside").mkdir()
+    os.symlink(wt / "link" / "worktrees", tmp_path / "outside" / "entry")
+    (wt / ".git").write_text(f"gitdir: {tmp_path}/outside/entry/wt\n")
+    with pytest.raises(ValueError, match="symlink inside"):
+        isolation.linked_worktree_gitdir(wt)
+    (tmp_path / "outside" / "entry").unlink()
+    os.symlink(tmp_path / "main" / ".git" / "worktrees", tmp_path / "outside" / "entry")  # not via DIR
+    assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
+    (wt / ".git").write_text(original)
+
+
+@needs_git
+def test_linked_worktree_accepts_symlinked_projects_dir(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    wt, gitdir = make_worktree(real)
+    os.symlink(real, tmp_path / "projects")
+    assert (wt / ".git").read_text().startswith(f"gitdir: {real}/main/.git/worktrees/")
+    assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
+    assert isolation.linked_worktree_gitdir(tmp_path / "projects" / "wt") == gitdir.resolve()
+
+
+@needs_git
 def test_linked_worktree_rejects_dotdot_after_component(tmp_path):
     wt, gitdir = make_worktree(tmp_path)
     (wt / "sub").mkdir()

@@ -179,6 +179,8 @@ def cmd_wait(store: JobStore, args) -> int:
     n = meta["round"]
     secs = "" if meta["secs"] is None else meta["secs"]
     print(f"status={meta['status']} round={n} secs={secs} response={store.round_dir(job, n) / 'response.md'}")
+    if meta["status"] != "done" and (error := meta.get("error")):
+        print(f"xv: {error}", file=sys.stderr)
     if nested := meta.get("nested_git"):
         print("xv: nested git repositories (remove before any git command): " + ", ".join(nested), file=sys.stderr)
     return 0 if meta["status"] == "done" else 1

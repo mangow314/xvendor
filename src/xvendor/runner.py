@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from xvendor.events import Event
-from xvendor.isolation import has_gitlinks, nested_git, wrap
+from xvendor.isolation import UnsupportedPlatform, has_gitlinks, nested_git, wrap
 from xvendor.jobs import JobError, JobStore
 from xvendor.vendors.base import Vendor
 
@@ -54,9 +54,15 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     try:
         writable = Path(meta["writable"]) if meta.get("writable") else None
         built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
-        if meta.get("mode") == "write" and has_gitlinks(Path(meta["writable"])):
-            raise RuntimeError(f"{meta['writable']} now has submodule entries (gitlinks); refusing the write round")
-        argv = wrap(vendor.name, built, tmpdir, writable)
+        try:
+            if meta.get("mode") == "write" and has_gitlinks(Path(meta["writable"])):
+                raise RuntimeError(f"{meta['writable']} now has submodule entries (gitlinks); refusing the write round")
+            argv = wrap(vendor.name, built, tmpdir, writable)
+        except (UnsupportedPlatform, ValueError, RuntimeError) as e:
+            msg = str(e)
+            (rd / "stderr.log").write_text(msg + "\n", encoding="utf-8")
+            final = {"status": "failed", "run_pid": None, "run_pgid": None, "error": msg}
+            raise
         lines: list[str] = []
         with open(rd / "stderr.log", "wb") as err, open(rd / "events.jsonl", "wb") as out:
             proc = subprocess.Popen(argv, cwd=meta["cwd"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -101,7 +107,7 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
         else:
             status = "done"
         final = dict(status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
-                     session=session or meta["session"])
+                     session=session or meta["session"], error=None)
         return status
     finally:
         for t in timers:
@@ -113,7 +119,7 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
         shutil.rmtree(tmpdir, ignore_errors=True)
         # one update writes the final status and nested_git together: `wait` returns as soon as status leaves running
         if not final and store.meta(job)["status"] == "running":
-            final = dict(status="failed", run_pid=None, run_pgid=None)
+            final = dict(status="failed", run_pid=None, run_pgid=None, error=None)
         if meta.get("mode") == "write":
             final["nested_git"] = [str(p) for p in nested_git(Path(meta["writable"]))]
         if final:

@@ -127,6 +127,34 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
     return _bwrap("agy", argv, tmpdir, state, STATE_READONLY, STATE_READONLY, state, writable)
 
 
+def _walk_symlinks_outside(start: Path, forbidden: Path) -> None:
+    """Resolve start component by component (like realpath); raise ValueError if any symlink met on the way
+    lives inside forbidden (resolved), because the vendor could re-point it."""
+    parts = list(Path(os.path.abspath(start)).parts)   # ('/', 'a', 'b', ...)
+    cur = Path(parts.pop(0))
+    hops = 0
+    while parts:
+        cur = cur / parts.pop(0)
+        while cur.is_symlink():
+            hops += 1
+            if hops > 40:
+                raise ValueError(f"too many symlinks resolving {start}")
+            if Path(os.path.realpath(cur.parent)).is_relative_to(forbidden):
+                raise ValueError(f"{cur} is a symlink inside {forbidden} on the gitdir path")
+            target = os.readlink(cur)
+            if os.path.isabs(target):
+                parts = list(Path(target).parts)[1:] + parts
+                cur = Path("/")
+            else:
+                parts = list(Path(target).parts) + parts
+                cur = cur.parent
+            # normalise: a leading ".." in parts pops cur
+            while parts and parts[0] in (".", ".."):
+                p = parts.pop(0)
+                if p == "..":
+                    cur = cur.parent
+
+
 def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Path:
     """The gitdir of the linked worktree at writable (its index lives there). Raise ValueError unless writable/.git
     is a pointer file to <repo>/.git/worktrees/<name> whose commondir leads back to <repo>/.git."""
@@ -147,14 +175,10 @@ def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Pat
     if ".." in parts:
         raise bad(f"{dotgit} has a '..' after a real path component")
     raw = Path(os.path.join(writable, ptext))
-    for a in [raw, *raw.parents]:
-        hop = a
-        for _ in range(40):
-            if not hop.is_symlink():
-                break
-            if Path(os.path.realpath(hop.parent)).is_relative_to(writable.resolve()):
-                raise bad(f"{hop} is a symlink inside {writable} on the gitdir path")
-            hop = Path(os.path.normpath(os.path.join(hop.parent, os.readlink(hop))))
+    try:
+        _walk_symlinks_outside(raw, writable.resolve())
+    except ValueError as e:
+        raise bad(str(e)) from None
     gitdir = raw.resolve()
     if not gitdir.is_dir():
         raise bad(f"{dotgit} points at {gitdir}, which is not a directory")

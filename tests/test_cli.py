@@ -223,9 +223,11 @@ def test_ask_refuses_gitlinks_added_between_rounds(xv, data, tmp_path):
     assert xv("ask", job, "-m", "again").returncode == 0
     proc = xv("wait", job)
     assert proc.returncode == 1
-    assert json.loads((data / "jobs" / job / "meta.json").read_text())["status"] == "failed"
-    log = (data / "jobs" / job / "round-2" / "stderr.log")
-    assert "gitlinks" in proc.stdout + proc.stderr + (log.read_text() if log.exists() else "")
+    meta = json.loads((data / "jobs" / job / "meta.json").read_text())
+    assert meta["status"] == "failed"
+    assert "gitlinks" in meta["error"]
+    assert "gitlinks" in (data / "jobs" / job / "round-2" / "stderr.log").read_text()
+    assert "gitlinks" in proc.stderr
 
 
 def test_start_write_refuses_second_writer(xv, tmp_path):

@@ -108,6 +108,8 @@ def cmd_start(store: JobStore, args) -> int:
     if args.write is not None:
         if not Path(args.write).is_dir():
             raise Fail(f"--write does not exist: {args.write}")
+        if (Path(args.write) / ".git").is_dir():
+            raise Fail(f"--write refuses a repository root ({args.write}/.git is a directory): use a linked worktree, e.g. git worktree add <dir> -b <branch>")
         writable = Path(args.write).resolve()
     cwd = Path(args.cwd or writable or os.getcwd())
     if not cwd.is_dir():

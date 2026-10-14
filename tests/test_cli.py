@@ -193,6 +193,14 @@ def test_start_write_missing_dir(xv, tmp_path):
     assert f"xv: --write does not exist: {tmp_path / 'nope'}" in proc.stderr
 
 
+def test_start_write_refuses_git_dir(xv, tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", repo)
+    assert proc.returncode == 2
+    assert "git worktree add" in proc.stderr
+
+
 def test_list_empty(xv):
     proc = xv("list")
     assert (proc.returncode, proc.stdout) == (0, "")

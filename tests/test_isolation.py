@@ -380,3 +380,40 @@ def test_real_bwrap_write_dir_only(tmp_path_factory):
                           timeout=30)
     assert proc.returncode != 0
     assert not (outside / "xv-probe").exists()
+
+
+@needs_bwrap
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_real_bwrap_worktree_status_ok_commit_denied(tmp_path_factory, monkeypatch):
+    base = tmp_path_factory.mktemp("repo")
+    main, wt = base / "main", base / "wt"
+    ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
+    subprocess.run(["git", "init", "-q", str(main)], check=True)
+    (main / "a.txt").write_text("a\n")
+    subprocess.run(["git", "-C", str(main), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(main), *ident, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "../wt", "-b", "lane"], check=True)
+    _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
+    g = "git -c safe.directory='*'"
+    script = (f"cd {base}\n"
+              "echo hi > wt/hello.txt; echo write=$?\n"
+              f"{g} -C wt status --porcelain > {tmp}/st.out 2>&1; echo status=$?; sed 's/^/ST:/' {tmp}/st.out\n"
+              f"{g} -C wt diff --stat >/dev/null 2>&1; echo diff=$?\n"
+              f"{g} -C wt add hello.txt >/dev/null 2>&1; echo add=$?\n"
+              f"{g} -C wt -c user.name=t -c user.email=t@x commit -qam x >/dev/null 2>&1; echo commit=$?\n"
+              "echo x >> main/a.txt 2>/dev/null; echo mainwrite=$?\n"
+              "ls main/.git/hooks >/dev/null 2>&1; echo hooks=$?\n")
+    proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
+    print(proc.stdout, proc.stderr)
+    rc = dict(l.split("=", 1) for l in proc.stdout.splitlines() if "=" in l and not l.startswith("ST:"))
+    assert rc["write"] == "0", proc.stdout
+    assert rc["status"] == "0" and "ST:?? hello.txt" in proc.stdout, proc.stdout
+    assert rc["diff"] == "0", proc.stdout
+    assert rc["add"] != "0", proc.stdout
+    assert rc["commit"] != "0", proc.stdout
+    assert rc["mainwrite"] != "0", proc.stdout
+    assert rc["hooks"] == "0", proc.stdout
+    host = subprocess.run(["git", "-C", str(wt), "status", "--porcelain"], capture_output=True, text=True, check=True)
+    assert "?? hello.txt" in host.stdout
+    log = subprocess.run(["git", "-C", str(main), "log", "--oneline"], capture_output=True, text=True, check=True)
+    assert len(log.stdout.splitlines()) == 1

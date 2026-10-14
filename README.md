@@ -36,14 +36,15 @@ The repo holds two things:
 
 ## Requirements
 
-- Linux. Tested on Arch Linux; codex jobs may also work on macOS but are
-  untested there.
+- Linux or macOS. Tested on Arch Linux and macOS 26.5 (see
+  [On macOS](#on-macos) for how the two differ).
 - Python 3.12 or later, and [uv](https://docs.astral.sh/uv/) to install.
 - At least one vendor CLI, installed and logged in:
   [codex](https://github.com/openai/codex) (`codex exec`) or agy (Google's
   Antigravity CLI, `agy -p`).
 - [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux,
-  for both vendors. Without it, `xv start` refuses to run. Each vendor must
+  for both vendors; on macOS the built-in `/usr/bin/sandbox-exec`, for agy.
+  Without it, `xv start` refuses to run. Each vendor must
   also have been run once interactively so its state directory exists;
   otherwise the round fails (the tmux pane shows what is missing).
 - Optional: tmux. Inside tmux each job gets a live pane; outside tmux it runs
@@ -217,7 +218,9 @@ bubblewrap (`bwrap`) layout:
   `~/.config/chromium`, `~/.config/BraveSoftware`, `~/.config/Bitwarden CLI`,
   `~/.config/gcloud`, `~/.docker/config.json`, `~/.password-store`,
   `~/.claude.json`, `~/.claude/projects`, `~/.codex/sessions`,
-  `~/.codex/history.jsonl`, plus per-project `.env` files:
+  `~/.codex/history.jsonl`, on macOS the Chrome, Chromium, Brave, Firefox
+  and Bitwarden CLI folders under `~/Library/Application Support` and
+  `~/Library/Cookies`, plus per-project `.env` files:
   `~/projects/*/.env`, `~/projects/*/.env.*`, `~/projects/*/*/.env` and
   `~/projects/*/.envrc`. (The source of truth is `SECRET_PATHS` and
   `SECRET_GLOBS` in `src/xvendor/isolation.py`.) Entries inside the vendor's
@@ -247,10 +250,65 @@ bubblewrap (`bwrap`) layout:
   not keep the first round's flag.
 - **agy's own `--sandbox`** does not stop its file-writing tools, so `xv`
   does not rely on it.
-- **Refuse, never degrade.** `xv start agy` refuses when `bwrap` is missing
-  or the platform is not Linux. On Linux codex also needs `bwrap`.
-  **On macOS codex runs without `xv` isolation**: only codex's own sandbox
-  applies, and `xv` prints a note to say so.
+- **Refuse, never degrade.** `xv start agy` refuses when `bwrap` (Linux) or
+  `/usr/bin/sandbox-exec` (macOS) is missing, and on any other platform.
+  On Linux codex also needs `bwrap`. **On macOS codex runs without `xv`
+  isolation**: only codex's own sandbox applies, and `xv` prints a note to
+  say so.
+
+### On macOS
+
+agy runs under `sandbox-exec` with a Seatbelt profile that mirrors the
+bubblewrap layout. Measured on macOS 26.5 with `tests/mac_smoke.py`.
+**The macOS sandbox can be escaped**, see the first bullet; use agy on macOS
+only for your own repositories.
+
+- **Escape through `open` and AppleEvents.** No Seatbelt rule stops
+  LaunchServices or AppleEvents: denying their services, `appleevent-send`,
+  `lsopen`, or every mach lookup left `open` and `osascript` working. A
+  vendor that writes `x.command` to its temp directory and runs
+  `open x.command` gets it run by Terminal outside the sandbox, with your
+  full rights, and what it starts outlives the round. This needs no
+  knowledge of the sandbox: `open` is an everyday command, so any prompt
+  injection in content the vendor reads (a third-party repository, a web
+  page) can lead there. `xv` denies running `open`, `osascript`,
+  `osacompile`, `automator`, `shortcuts`, `launchctl`, `screencapture`,
+  `pbcopy` and `pbpaste` by path. That is friction against copy-paste
+  payloads only: a copied binary or a script calling the same APIs is not
+  stopped. codex's own sandbox is built on the same mechanism and likely
+  has the same gap (not measured). Revoking your terminal app's rights
+  under System Settings > Privacy & Security > Automation closes the
+  `osascript` path, not the `open` one. The only robust fix known is
+  running agy as a separate macOS user without a GUI login session.
+- **Same rules for files, sockets and processes.** Writes are denied
+  everywhere except the state directory, the per-round temp directory and,
+  in write mode, `DIR`; `settings.json`, `builtin`, `bin` and `DIR/.git` are
+  denied again inside them. The credential paths above are denied for
+  reading and writing (`Operation not permitted` instead of an empty file).
+  Unix sockets are denied except DNS (`mDNSResponder`) and sockets inside
+  the writable directories, which covers docker, ssh-agent and tmux. Signals
+  and process info are limited to processes in the same sandbox.
+- **A throwaway HOME instead of bind mounts.** agy has no option for its
+  state directory and Seatbelt cannot mount, so each round runs agy with
+  `HOME` set to a folder in the round's temp directory. Every entry of
+  `~/.gemini` and of the state directory there is a symlink back to the real
+  path (the profile decides what may be written), except `bin`, which is a
+  copy deleted with the round. `Library/Keychains` points at the real one so
+  agy still finds its login, which it keeps in the Keychain. Commands agy
+  runs see this HOME too, so they do not read your shell or git config.
+- **codex keeps only its own sandbox.** codex's `-s read-only` is itself a
+  Seatbelt sandbox and Seatbelt cannot be applied twice
+  (`sandbox_apply: Operation not permitted`), so `xv` does not wrap codex on
+  macOS. codex's sandbox denies all writes and network access for the
+  commands it runs, but does not hide credential files.
+- **Other gaps Linux does not have.** The Keychain is readable, because agy
+  needs its own token from it: any item whose access list lets the
+  `security` tool read it without asking is exposed. The vendor inherits
+  your terminal app's privacy grants: with Full Disk Access it can read
+  Mail, Messages and Safari data, with Screen Recording it can take
+  screenshots. There is no pid namespace: `xv` kills the round's process
+  group when the round ends, which misses a process that left the group with
+  `setsid`.
 
 What this does not cover:
 

@@ -87,6 +87,23 @@ def test_argv_reaches_cli(store, tmp_path, env, fixture_path, monkeypatch):
     assert json.loads(out.read_text()) == CodexVendor().build(1, None, "question", None)[1:]
 
 
+def test_background_process_dies_with_round(store, tmp_path, env, fixture_path, monkeypatch):
+    pidfile = tmp_path / "bg.pid"
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: [
+        "sh", "-c", f"sleep 60 >/dev/null 2>&1 & echo $! > {pidfile}; exec \"$@\"", "sh", *argv])
+    job = new_job(store, tmp_path)
+    assert runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"))) == "done"
+    pid = int(pidfile.read_text())
+    for _ in range(50):  # killed, then reaped by its new parent
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail(f"background process {pid} outlived the round")
+
+
 def test_nonzero_rc_failed(store, tmp_path, env, fixture_path):
     job = new_job(store, tmp_path)
     status = runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"), XV_FAKE_RC=1))

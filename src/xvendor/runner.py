@@ -33,7 +33,7 @@ def scrub_env(environ: Mapping[str, str]) -> dict[str, str]:
 def _killpg(pgid: int, sig: int) -> None:
     try:
         os.killpg(pgid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):  # group gone, or its id reused by another user's process
         pass
 
 
@@ -112,8 +112,9 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     finally:
         for t in timers:
             t.cancel()
-        # an exception mid-round (e.g. the display's terminal went away) must not orphan the vendor CLI
-        if proc is not None and proc.poll() is None:
+        # an exception mid-round (e.g. the display's terminal went away) must not orphan the vendor CLI, and
+        # background processes it left behind die with the round (on macOS there is no pid namespace to do it)
+        if proc is not None:
             _killpg(proc.pid, signal.SIGKILL)
             proc.wait()
         shutil.rmtree(tmpdir, ignore_errors=True)

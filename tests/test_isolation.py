@@ -14,7 +14,7 @@ needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap"
 
 
 def test_codex_passthrough_off_linux(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(isolation.sys, "platform", "darwin")
+    monkeypatch.setattr(isolation.sys, "platform", "win32")
     argv = ["codex", "exec", "-s", "read-only", "hi"]
     assert wrap("codex", argv, tmp_path) == argv
     assert "runs without xv isolation" in capsys.readouterr().err
@@ -155,10 +155,96 @@ def test_agy_skips_missing_tmux_dir(tmp_path, monkeypatch):
     assert str(tmp_path / "nowhere") not in " ".join(argv)
 
 
-def test_agy_rejected_on_darwin(tmp_path, monkeypatch):
-    monkeypatch.setattr(isolation.sys, "platform", "darwin")
-    with pytest.raises(UnsupportedPlatform, match="darwin"):
+def test_agy_rejected_on_win32(tmp_path, monkeypatch):
+    monkeypatch.setattr(isolation.sys, "platform", "win32")
+    with pytest.raises(UnsupportedPlatform, match="win32"):
         wrap("agy", ["agy"], tmp_path)
+
+
+def on_darwin(tmp_path, monkeypatch):
+    monkeypatch.setattr(isolation.sys, "platform", "darwin")
+    sbx = tmp_path / "sandbox-exec"
+    sbx.write_text("")
+    monkeypatch.setattr(isolation, "SANDBOX_EXEC", str(sbx))
+    return str(sbx)
+
+
+def seatbelt_params(argv):
+    """-D KEY=path pairs of a sandbox-exec line, as {path: [keys]}."""
+    out = {}
+    for i, a in enumerate(argv[:argv.index("--")]):
+        if a == "-D":
+            key, path = argv[i + 1].split("=", 1)
+            out.setdefault(path, []).append(key)
+    return out
+
+
+def test_seatbelt_rejected_without_sandbox_exec(tmp_path, monkeypatch):
+    monkeypatch.setattr(isolation.sys, "platform", "darwin")
+    monkeypatch.setattr(isolation, "SANDBOX_EXEC", str(tmp_path / "nope"))
+    with pytest.raises(UnsupportedPlatform, match="nope"):
+        wrap("agy", ["agy"], tmp_path)
+
+
+def test_seatbelt_agy_layout(tmp_path, monkeypatch):
+    sbx = on_darwin(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".gemini").mkdir()
+    (home / ".gemini" / "oauth_creds.json").write_text("{}")
+    state = home / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "bin" / "agentapi").write_text("orig")
+    (state / "builtin").mkdir()
+    (state / "conversations").mkdir()
+    (state / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    tmp = tmp_path / "agytmp"
+    tmp.mkdir()
+    argv = wrap("agy", ["agy", "-p", "hi"], tmp)
+    assert argv[:2] == [sbx, "-p"]
+    profile = argv[2]
+    params = seatbelt_params(argv)
+    # writable: state + tmpdir; re-protected: settings.json, builtin, the host bin; hidden: secrets
+    assert {"W0", "U0"} <= set(params[str(state)]) and {"W1", "U1"} <= set(params[str(tmp)])
+    for name in ("settings.json", "builtin", "bin"):
+        assert params[str(state / name)][0].startswith("R")
+    assert params[str(home / ".ssh")][0].startswith("S")
+    assert params[str(home / ".gemini" / "oauth_creds.json")][0].startswith("S")
+    assert profile.index("(deny file-write*)") < profile.index("(allow file-write*") < profile.index('(param "R0")')
+    assert "(deny network-outbound (remote unix-socket))" in profile
+    fake = tmp / "home"
+    assert argv[argv.index("--") + 1:] == ["/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE", f"TMPDIR={tmp}",
+                                           f"HOME={fake}", "agy", "-p", "hi"]
+    fstate = fake / ".gemini" / "antigravity-cli"
+    # bin is a copy, everything else points back at the real path, and the login keychain is reachable
+    assert not (fstate / "bin").is_symlink() and (fstate / "bin" / "agentapi").read_text() == "orig"
+    assert (fstate / "settings.json").readlink() == state / "settings.json"
+    assert (fstate / "conversations").readlink() == state / "conversations"
+    assert (fake / ".gemini" / "oauth_creds.json").readlink() == home / ".gemini" / "oauth_creds.json"
+    assert (fake / "Library" / "Keychains").readlink() == home / "Library" / "Keychains"
+    wrap("agy", ["agy"], tmp)  # a second wrap in the same tmpdir rebuilds the fake home
+
+
+def test_seatbelt_agy_refused_when_bin_missing(tmp_path, monkeypatch):
+    on_darwin(tmp_path, monkeypatch)
+    state = tmp_path / "home" / ".gemini" / "antigravity-cli"
+    (state / "builtin").mkdir(parents=True)
+    (state / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    with pytest.raises(UnsupportedPlatform, match="bin"):
+        wrap("agy", ["agy"], tmp_path / "t")
+
+
+def test_seatbelt_codex_layout(tmp_path, monkeypatch):
+    _, state = fake_codex_home(tmp_path, monkeypatch)
+    on_darwin(tmp_path, monkeypatch)
+    params = seatbelt_params(argv := wrap("codex", ["codex", "exec", "hi"], tmp_path / "t"))
+    for name in ("config.toml", "hooks", "local.config.toml"):
+        assert params[str(state / name)][0].startswith("R")
+    assert str(state / "auth.json") not in params  # its own login stays readable
+    assert not any(a.startswith("HOME=") for a in argv)
+    assert argv[-3:] == ["codex", "exec", "hi"]
 
 
 def test_agy_rejected_without_bwrap(tmp_path, monkeypatch):
@@ -404,6 +490,17 @@ def test_write_argv_binds_dir(tmp_path, monkeypatch):
     assert at[0] > argv.index(str(state))
     assert at[0] < argv.index(str(tmp_path / "t"))
     assert wrap("codex", ["codex"], tmp_path / "t").count("--bind") == 2  # state + tmp only
+
+
+@needs_git
+def test_seatbelt_write_dir(tmp_path, monkeypatch):
+    fake_codex_home(tmp_path, monkeypatch)
+    on_darwin(tmp_path, monkeypatch)
+    wt, gitdir = make_worktree(tmp_path)
+    params = seatbelt_params(wrap("codex", ["codex"], tmp_path / "t", wt))
+    assert "W2" in params[str(wt)]
+    assert params[str(wt / ".git")][0].startswith("R")
+    assert not any(Path(p) == gitdir or gitdir in Path(p).parents for p in params)
 
 
 @needs_git

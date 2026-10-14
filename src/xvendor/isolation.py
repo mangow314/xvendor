@@ -1,7 +1,8 @@
 # Read-only isolation for vendor CLIs. agy and codex share one bubblewrap layout (_bwrap): read-only root,
 # writable own state dir with config-like entries re-protected, writable tmpdir, secrets and sockets hidden.
 # codex's own inner sandbox (-s read-only) stays as a second layer. --unshare-pid gives the vendor its own pid
-# namespace: leftover background processes die with bwrap and host pids (/proc/<pid>/root) are invisible. codex runs unwrapped on non-Linux.
+# namespace: leftover background processes die with bwrap and host pids (/proc/<pid>/root) are invisible.
+# On macOS the same layout is a Seatbelt profile run by sandbox-exec (_seatbelt); codex runs unwrapped elsewhere.
 import os
 import shutil
 import subprocess
@@ -31,7 +32,11 @@ SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentia
                 # Claude Code account state and conversation transcripts
                 ".claude.json", ".claude/projects",
                 # codex conversation transcripts and prompt history
-                ".codex/sessions", ".codex/history.jsonl")
+                ".codex/sessions", ".codex/history.jsonl",
+                # macOS browser profiles and Bitwarden CLI data
+                "Library/Application Support/Google/Chrome", "Library/Application Support/Chromium",
+                "Library/Application Support/BraveSoftware", "Library/Application Support/Firefox",
+                "Library/Cookies", "Library/Application Support/Bitwarden CLI")
 
 # Home-relative glob patterns for per-project secret files: .env, .env.* and .envrc.
 SECRET_GLOBS = ("projects/*/.env", "projects/*/.env.*", "projects/*/*/.env", "projects/*/.envrc")
@@ -47,11 +52,25 @@ STATE_SHADOW = ("bin",)
 CODEX_STATE_READONLY = ("config.toml", "AGENTS.md", "hooks", "rules", "skills", "plugins", "agents")
 CODEX_STATE_REQUIRED = ("config.toml", "hooks")
 
+# Only the system copy: a sandbox-exec earlier on PATH could be anything.
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+
+# macOS services that run work outside the sandbox on request (AppleEvents scripting other apps, LaunchServices
+# opening apps or files) or expose the clipboard; the counterpart of hiding D-Bus and X11 on Linux.
+MACH_DENY = ("com.apple.coreservices.appleevents", "com.apple.coreservices.launchservicesd",
+             "com.apple.pasteboard.1")
+# The one unix socket outside the writable dirs a vendor needs: DNS resolution goes through mDNSResponder.
+UNIX_SOCKET_ALLOW = ("/private/var/run/mDNSResponder",)
+
 
 def check(vendor: str) -> None:
     """Raise UnsupportedPlatform when vendor cannot be run read-only here (R3: refuse, never degrade)."""
     if vendor not in ("codex", "agy"):
         raise UnsupportedPlatform(f"no isolation defined for vendor {vendor!r}")
+    if sys.platform == "darwin":
+        if not os.path.exists(SANDBOX_EXEC):
+            raise UnsupportedPlatform(f"{vendor} needs {SANDBOX_EXEC} for read-only isolation; not found")
+        return
     if vendor == "codex" and sys.platform != "linux":
         return
     if sys.platform != "linux":
@@ -119,14 +138,19 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
     plus writable when given (--write mode)."""
     check(vendor)
     if vendor == "codex":
-        if sys.platform != "linux":
+        if sys.platform not in ("linux", "darwin"):
             print(f"xv: codex runs without xv isolation on {sys.platform}", file=sys.stderr)
             return list(argv)
         state = state_dir("codex")
         protect = list(CODEX_STATE_READONLY)
         extra = sorted(p.name for p in state.glob("*.config.toml")) if state.is_dir() else []
+        if sys.platform == "darwin":
+            return _seatbelt("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, writable)
         return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state, writable)
     state = state_dir("agy")
+    if sys.platform == "darwin":
+        return _seatbelt("agy", argv, tmpdir, state, STATE_READONLY + STATE_SHADOW, STATE_READONLY + STATE_SHADOW,
+                         writable, fake_home=True)
     return _bwrap("agy", argv, tmpdir, state, STATE_READONLY, STATE_READONLY + STATE_SHADOW, state, writable,
                   shadow_entries=STATE_SHADOW)
 
@@ -303,3 +327,76 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
     return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", *hide,
             "--bind", str(state), str(state), *protect, *write, "--bind", tmp, tmp, "--setenv", "TMPDIR", tmp,
             "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--unshare-pid", "--die-with-parent", "--", *argv]
+
+
+def _fake_home(tmpdir: Path, state: Path) -> Path:
+    """Per-round HOME for agy on macOS, standing in for bwrap's bind mounts (agy has no flag for its state dir):
+    each entry of the real ~/.gemini and of the state dir is a symlink back to the real path, and the profile
+    decides what may be written there; bin/ is a throwaway copy instead. Library/Keychains points at the real
+    one so agy still finds its login token (the Security framework looks it up under $HOME)."""
+    home = tmpdir / "home"
+    shutil.rmtree(home, ignore_errors=True)  # a tmpdir reused by a second wrap() starts fresh
+    fstate = home / state.relative_to(Path.home())
+    fstate.mkdir(parents=True)
+    for e in state.parent.iterdir():
+        if e.name != state.name:
+            (fstate.parent / e.name).symlink_to(e)
+    for e in state.iterdir():
+        if e.name in STATE_SHADOW:
+            shutil.copytree(e, fstate / e.name, symlinks=True)
+        else:
+            (fstate / e.name).symlink_to(e)
+    (home / "Library").mkdir()
+    (home / "Library" / "Keychains").symlink_to(Path.home() / "Library" / "Keychains")
+    return home
+
+
+def _seatbelt(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_entries, required_entries,
+              writable: Path | None = None, fake_home: bool = False) -> list[str]:
+    """sandbox-exec line for macOS, the _bwrap layout as a Seatbelt profile. Paths go in as -D parameters, so the
+    profile text needs no quoting, and are resolved first because Seatbelt matches the resolved path."""
+    protect = []
+    for rel in readonly_entries:
+        p = state / rel
+        if not os.path.exists(p):
+            if rel in required_entries:
+                raise UnsupportedPlatform(f"{p} is missing; create it (or run {vendor} once) so it exists, then retry")
+            continue
+        protect.append(p)
+    allow = [state, tmpdir]
+    if writable is not None:
+        linked_worktree_gitdir(writable, state)  # validate only; the gitdir is outside every allowed path
+        allow.append(writable)
+        protect.append(writable / ".git")
+    hide = [p for p, _ in _secret_items(Path.home(), state)]
+    env = ["/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE", f"TMPDIR={tmpdir}"]
+    if fake_home:
+        env.append(f"HOME={_fake_home(tmpdir, state)}")
+
+    params: list[str] = []
+
+    def refs(key: str, paths, form: str = "{}") -> str:
+        out = []
+        for i, p in enumerate(paths):
+            params.extend(["-D", f"{key}{i}={os.path.realpath(p)}"])
+            out.append(form.format(f'(subpath (param "{key}{i}"))'))
+        return " ".join(out)
+
+    # Later rules win: writes are denied, then allowed under the writable dirs, then denied again for the
+    # protected entries inside them.
+    rules = ["(version 1)", "(allow default)", "(deny file-write*)",
+             f'(allow file-write* (subpath "/dev") {refs("W", allow)})']
+    if protect:
+        rules.append(f"(deny file-write* {refs('R', protect)})")
+    if hide:
+        rules.append(f"(deny file-read* file-write* {refs('S', hide)})")
+    # A read-only file system does not stop connect() to a unix socket (docker, tmux, ssh-agent): deny them all
+    # but DNS and the writable dirs.
+    sockets = " ".join(f'(remote unix-socket (subpath "{s}"))' for s in UNIX_SOCKET_ALLOW)
+    rules += ["(deny network-outbound (remote unix-socket))",
+              f"(allow network-outbound {sockets} {refs('U', allow, '(remote unix-socket {})')})",
+              "(deny mach-lookup " + " ".join(f'(global-name "{n}")' for n in MACH_DENY) + ")",
+              # no pid namespace here: at least keep the vendor away from processes outside its sandbox
+              "(deny signal)", "(allow signal (target same-sandbox))",
+              "(deny process-info*)", "(allow process-info* (target same-sandbox))"]
+    return [SANDBOX_EXEC, "-p", "\n".join(rules), *params, "--", *env, *argv]

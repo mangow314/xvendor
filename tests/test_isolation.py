@@ -575,3 +575,32 @@ def test_nested_git_listed(tmp_path):
     (wt / "deep" / "mod").mkdir(parents=True)
     (wt / "deep" / "mod" / ".git").write_text("gitdir: elsewhere\n")
     assert isolation.nested_git(wt) == [wt / "deep" / "mod" / ".git", wt / "sub" / ".git"]
+
+
+@needs_git
+def test_linked_worktree_rejects_symlink_in_pointer_path(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    original = (wt / ".git").read_text()
+    os.symlink(gitdir.parent, wt / "link")
+    (wt / ".git").write_text("gitdir: link/wt\n")
+    with pytest.raises(ValueError, match="symlink inside"):
+        isolation.linked_worktree_gitdir(wt)
+    (wt / ".git").write_text(original)
+    assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
+
+
+@needs_git
+def test_linked_worktree_rejects_repo_in_state(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
+    repo = state / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.txt").write_text("a\n")
+    subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), *ident, "commit", "-q", "-m", "init"], check=True)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(wt), "-b", "lane"], check=True)
+    with pytest.raises(ValueError, match="vendor state dir"):
+        isolation.linked_worktree_gitdir(wt, own_state=state)
+    assert isolation.linked_worktree_gitdir(wt) is not None

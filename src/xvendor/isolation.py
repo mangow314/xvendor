@@ -83,16 +83,21 @@ def _hide_secrets(home: Path, own_state: Path | None) -> list[str]:
 def writable_overlaps_hidden(home: Path, writable: Path, own_state: Path) -> str | None:
     """The path that writable (already resolved) equals or sits under among own_state and the paths xv hides
     from the vendor, or None."""
-    home = home.resolve()
     state = own_state.resolve()
     if writable.is_relative_to(state) or state.is_relative_to(writable):
         return str(own_state)
+    return _under_hidden(home, writable)
+
+
+def _under_hidden(home: Path, path: Path) -> str | None:
+    """The SECRET_PATHS / SECRET_GLOBS entry that path (already resolved) equals or sits under, or None."""
+    home = home.resolve()
     for rel in SECRET_PATHS:
-        if writable.is_relative_to((home / rel).resolve()):
+        if path.is_relative_to((home / rel).resolve()):
             return str(home / rel)
     for pattern in SECRET_GLOBS:
         for p in home.glob(pattern):
-            if writable.is_relative_to(p.resolve()):
+            if path.is_relative_to(p.resolve()):
                 return str(p)
     return None
 
@@ -120,7 +125,7 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
     return _bwrap("agy", argv, tmpdir, state, STATE_READONLY, STATE_READONLY, state, writable)
 
 
-def linked_worktree_gitdir(writable: Path) -> Path:
+def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Path:
     """The gitdir of the linked worktree at writable (its index lives there). Raise ValueError unless writable/.git
     is a pointer file to <repo>/.git/worktrees/<name> whose commondir leads back to <repo>/.git."""
     def bad(why: str) -> ValueError:
@@ -133,7 +138,11 @@ def linked_worktree_gitdir(writable: Path) -> Path:
     text = dotgit.read_text(encoding="utf-8", errors="replace").strip()
     if not text.startswith("gitdir:"):
         raise bad(f"{dotgit} has no gitdir line")
-    gitdir = (writable / text.removeprefix("gitdir:").strip()).resolve()
+    raw = Path(os.path.join(writable, text.removeprefix("gitdir:").strip()))
+    for a in [raw, *raw.parents]:
+        if a.is_symlink() and Path(os.path.realpath(a.parent)).is_relative_to(writable.resolve()):
+            raise bad(f"{a} is a symlink inside {writable} on the gitdir path")
+    gitdir = raw.resolve()
     if not gitdir.is_dir():
         raise bad(f"{dotgit} points at {gitdir}, which is not a directory")
     if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
@@ -146,6 +155,10 @@ def linked_worktree_gitdir(writable: Path) -> Path:
     common = gitdir.parent.parent
     if common.is_relative_to(writable.resolve()):
         raise bad(f"{common} lies inside {writable}: the repository itself would become writable")
+    if own_state is not None and common.is_relative_to(own_state.resolve()):
+        raise bad(f"{common} lies inside the vendor state dir {own_state}, which is writable for the vendor")
+    if hit := _under_hidden(Path.home(), common):
+        raise bad(f"{common} lies inside {hit}, which xv hides from the vendor")
     return gitdir
 
 
@@ -211,7 +224,7 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
         # The whole gitdir stays read-only (part of the ro root): index, HEAD and config.worktree cannot change, so
         # the vendor cannot add (gitlinks included), commit, switch branches or plant config the host's git would
         # read. DIR/.git is ro-bound back after the --bind of DIR.
-        linked_worktree_gitdir(writable)  # validate only
+        linked_worktree_gitdir(writable, own_state)  # validate only
         write += ["--bind", str(writable), str(writable), "--ro-bind", str(writable / ".git"),
                   str(writable / ".git")]
         write += hide_after

@@ -3,6 +3,7 @@ import errno
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -108,13 +109,21 @@ def cmd_start(store: JobStore, args) -> int:
     if args.write is not None:
         if not Path(args.write).is_dir():
             raise Fail(f"--write does not exist: {args.write}")
-        try:
-            isolation.linked_worktree_gitdir(Path(args.write))
-        except ValueError as e:
-            raise Fail(str(e)) from None
         writable = Path(args.write).resolve()
         if hit := isolation.writable_overlaps_hidden(Path.home(), writable, isolation.state_dir(args.vendor)):
             raise Fail(f"--write refuses {writable}: it is under {hit}, which xv hides from the vendor")
+        try:
+            isolation.linked_worktree_gitdir(Path(args.write), isolation.state_dir(args.vendor))
+        except ValueError as e:
+            raise Fail(str(e)) from None
+        ls = subprocess.run(["git", "-C", str(writable), "ls-files", "-s"], capture_output=True, text=True)
+        if ls.returncode != 0:
+            first = ls.stderr.strip().splitlines()[:1]
+            raise Fail(f"--write: git ls-files failed in {writable}: {first[0] if first else ''}")
+        if any(line.startswith("160000 ") for line in ls.stdout.splitlines()):
+            raise Fail(f"--write refuses {writable}: its index has submodule entries (gitlinks); a vendor could plant "
+                       "config in a submodule that your next git diff would run. Use a worktree of a repository "
+                       "without submodules")
     cwd = Path(args.cwd or writable or os.getcwd())
     if not cwd.is_dir():
         raise Fail(f"--cwd does not exist: {args.cwd}")
@@ -171,6 +180,8 @@ def cmd_wait(store: JobStore, args) -> int:
     n = meta["round"]
     secs = "" if meta["secs"] is None else meta["secs"]
     print(f"status={meta['status']} round={n} secs={secs} response={store.round_dir(job, n) / 'response.md'}")
+    if nested := meta.get("nested_git"):
+        print("xv: nested git repositories (remove before any git command): " + ", ".join(nested), file=sys.stderr)
     return 0 if meta["status"] == "done" else 1
 
 
@@ -181,7 +192,7 @@ def cmd_show(store: JobStore, args) -> int:
     if not path.is_file():
         raise Fail(f"round {n} has no response: {path}")
     if nested := store.meta(job).get("nested_git"):
-        print("xv: nested git repositories: " + ", ".join(nested), file=sys.stderr)
+        print("xv: nested git repositories (remove before any git command): " + ", ".join(nested), file=sys.stderr)
     sys.stdout.write(path.read_text(encoding="utf-8"))
     return 0
 
@@ -250,12 +261,9 @@ def cmd_run(store: JobStore, args) -> int:
     try:
         runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event,
                          popen_env=runner.scrub_env(os.environ))
-        if meta.get("mode") == "write":
-            nested = [str(x) for x in isolation.nested_git(Path(meta["writable"]))]
-            store.update(job, nested_git=nested)
-            if nested:
-                display.warn(f"nested git repositories under {meta['writable']} "
-                             "(do not git add them; remove them first): " + ", ".join(nested))
+        if nested := store.meta(job).get("nested_git"):
+            display.warn(f"nested git repositories under {meta['writable']}: remove them before running any git "
+                         "command in the worktree: " + ", ".join(nested))
         _finish(display, store, job, n)
     except Exception as e:  # runner already marked the job failed; keep the message visible
         print(f"xv: _run failed: {e}", file=sys.stderr)

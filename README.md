@@ -142,13 +142,21 @@ a linked worktree (`git worktree add <dir> -b <branch>`): a plain directory,
 a repository root, and `--separate-git-dir` or submodule layouts are refused,
 and so is a `DIR` under a path `xv` hides or under the vendor's state
 directory. The vendor can run `git status` and `git diff`, but not `git add`,
-`git commit` or switch branches. The vendor can still create a nested
-repository (`sub/.git/`) inside `DIR`; its config is run by your git after you
-`git add` it and run the next `git status`. When a round ends `xv` lists every
-nested `.git` under `DIR` (and records them in the job's meta as `nested_git`;
-`xv show` repeats the warning): delete them before you `git add`. Do not touch `DIR` yourself while a round is running. When
-`xv wait` returns, review with `git -C DIR diff`, then commit and merge
-yourself. Only one job at a time may write a given `DIR`; a second
+`git commit` or switch branches. The main repository's `.git` and this
+worktree's gitdir stay read-only for the vendor: it cannot add, commit, switch
+branches or change git config files. A worktree whose index has submodule
+entries (gitlinks) is refused by `--write`: the vendor could put config in a
+submodule directory, and your next `git diff` would run it. The vendor can still
+create a nested repository (`sub/.git/`) inside `DIR`. When a round ends `xv`
+lists every nested `.git` under `DIR` (and records them in the job's meta as
+`nested_git`; `xv wait` and `xv show` repeat the warning): delete them **before
+you run any git command in the worktree**. One exception comes from your own
+git config: if it runs a program from inside the worktree (`diff.<driver>.textconv`,
+`filter.<name>.clean`/`smudge`, `core.hooksPath` pointing into the worktree),
+the vendor can change that program and your next `git diff` or `git status`
+runs it. Do not touch `DIR` yourself while a round is running. When
+`xv wait` returns, check the nested-git warning, delete those entries, review
+with `git -C DIR diff`, then commit and merge yourself. Only one job at a time may write a given `DIR`; a second
 `xv start` is refused. `ask` keeps the write directory set by `start`.
 Once a round is over and you have committed or merged, run
 `git worktree remove <dir>` (and `git branch -d` if needed) so unused
@@ -174,8 +182,9 @@ bubblewrap (`bwrap`) layout:
   `DIR` (a linked worktree; `DIR/.git` must not be a symlink and the main
   repository must not sit inside `DIR`). The worktree's whole git directory
   stays read-only, `DIR/.git` included, so the vendor cannot `git add`
-  (gitlinks too), commit, switch branches, or change any setting your git
-  reads.
+  (gitlinks too), commit, switch branches, or change git config files. A program your own
+  git config runs from inside the worktree (`textconv`, `filter`, `core.hooksPath`)
+  is not covered; see Write mode.
 - **`/run` and X11 hidden.** `/run`, `/tmp/.X11-unix` and the default tmux
   socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
   empty in-memory folders. A read-only mount does not stop `connect()` to a

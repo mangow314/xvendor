@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from xvendor.events import Event
-from xvendor.isolation import wrap
+from xvendor.isolation import nested_git, wrap
 from xvendor.jobs import JobError, JobStore
 from xvendor.vendors.base import Vendor
 
@@ -97,8 +97,11 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
             status = "failed"
         else:
             status = "done"
+        extra = {}
+        if meta.get("mode") == "write":
+            extra["nested_git"] = [str(p) for p in nested_git(Path(meta["writable"]))]
         store.update(job, status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
-                     session=session or meta["session"])
+                     session=session or meta["session"], **extra)
         return status
     finally:
         for t in timers:

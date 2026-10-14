@@ -183,14 +183,34 @@ def test_run_reports_nested_git(xv, data, tmp_path):
     (work / "sub" / ".git").mkdir(parents=True)
     job = xv("start", "codex", "-m", "q", "--no-pane", "--write", work).stdout.strip()
     xv("wait", job)
-    meta_path = data / "jobs" / job / "meta.json"
-    for _ in range(50):  # the runner marks the job done just before the runner process records nested_git
-        meta = json.loads(meta_path.read_text())
-        if "nested_git" in meta:
-            break
-        time.sleep(0.1)
+    meta = json.loads((data / "jobs" / job / "meta.json").read_text())  # same read as the one wait saw: no polling
     assert meta["nested_git"] == [str(work.resolve() / "sub" / ".git")]
     assert "nested git" in xv("show", job).stderr
+
+
+def test_wait_reports_nested_git(xv, data, tmp_path):
+    work = make_worktree(tmp_path)
+    (work / "sub" / ".git").mkdir(parents=True)
+    job = xv("start", "codex", "-m", "q", "--no-pane", "--write", work).stdout.strip()
+    proc = xv("wait", job)
+    assert "status=done" in proc.stdout
+    assert "nested git repositories" in proc.stderr
+    assert json.loads((data / "jobs" / job / "meta.json").read_text())["nested_git"]
+
+
+def test_start_write_refuses_gitlinks(xv, tmp_path):
+    main = tmp_path / "main-wt"
+    ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
+    subprocess.run(["git", "init", "-q", str(main)], check=True)
+    (main / "a.txt").write_text("a\n")
+    subprocess.run(["git", "-C", str(main), "add", "a.txt"], check=True)
+    sha = "1" * 40
+    subprocess.run(["git", "-C", str(main), "update-index", "--add", "--cacheinfo", f"160000,{sha},sub"], check=True)
+    subprocess.run(["git", "-C", str(main), *ident, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "../wt", "-b", "lane"], check=True)
+    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", tmp_path / "wt")
+    assert proc.returncode == 2
+    assert "submodule" in proc.stderr
 
 
 def test_start_write_refuses_second_writer(xv, tmp_path):

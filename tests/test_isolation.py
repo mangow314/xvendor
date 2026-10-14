@@ -100,6 +100,7 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
     (home / ".netrc").write_text("x")
     state = home / ".gemini" / "antigravity-cli"
     (state / "bin").mkdir(parents=True)
+    (state / "bin" / "agentapi").write_text("#!/bin/sh\nexec x\n")
     (state / "builtin").mkdir()
     (state / "settings.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
@@ -118,8 +119,11 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
         *hide, "--tmpfs", f"{tmux_root}/tmux-{uid}",
         "--tmpfs", str(home / ".ssh"), "--ro-bind", "/dev/null", str(home / ".netrc"),
         "--bind", st, st, "--ro-bind", f"{st}/settings.json", f"{st}/settings.json",
-        "--ro-bind", f"{st}/bin", f"{st}/bin", "--ro-bind", f"{st}/builtin", f"{st}/builtin", "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
+        "--ro-bind", f"{st}/builtin", f"{st}/builtin", "--bind", f"{tmp}/shadow/bin", f"{st}/bin",
+        "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
         "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--unshare-pid", "--die-with-parent", "--", "agy", "-p", "hi"]
+    assert (tmp / "shadow" / "bin").is_dir()
+    assert (tmp / "shadow" / "bin" / "agentapi").read_text() == (state / "bin" / "agentapi").read_text()
 
 
 @needs_bwrap
@@ -278,6 +282,7 @@ def test_real_bwrap_gemini_narrowed(tmp_path_factory, monkeypatch):
     home = tmp_path_factory.mktemp("home")
     state = home / ".gemini" / "antigravity-cli"
     (state / "bin").mkdir(parents=True)
+    (state / "bin" / "agentapi").write_text("orig")
     (state / "builtin").mkdir()
     (state / "settings.json").write_text("{}")
     (home / ".gemini" / "settings.json").write_text("{}")
@@ -290,8 +295,28 @@ def test_real_bwrap_gemini_narrowed(tmp_path_factory, monkeypatch):
            "    except OSError: print(name, 'denied')"
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.split("\n")[:4] == ["state ok", "config denied", "bin denied", "top denied"]
+    assert proc.stdout.split("\n")[:4] == ["state ok", "config denied", "bin ok", "top denied"]
     assert (state / "settings.json").read_text() == "{}"
+    assert (state / "bin" / "agentapi").read_text() == "orig"
+
+
+@needs_bwrap
+def test_real_bwrap_agy_bin_shadow_discarded(tmp_path_factory, monkeypatch):
+    home = tmp_path_factory.mktemp("home")
+    state = home / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "bin" / "agentapi").write_text("orig")
+    (state / "builtin").mkdir()
+    (state / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    tmp = tmp_path_factory.mktemp("agytmp")
+    path = str(state / "bin" / "agentapi")
+    code = f"open({path!r}, 'w').write('changed')\nprint(open({path!r}).read())"
+    proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "changed"
+    assert (state / "bin" / "agentapi").read_text() == "orig"
+    assert (tmp / "shadow" / "bin" / "agentapi").read_text() == "changed"
 
 
 @needs_bwrap
@@ -303,6 +328,12 @@ def test_agy_refused_when_protected_entry_missing(tmp_path, monkeypatch):
     with pytest.raises(UnsupportedPlatform, match="settings.json"):
         wrap("agy", ["agy"], tmp_path)
     assert not (state / "settings.json").exists()
+    state2 = tmp_path / "h2" / ".gemini" / "antigravity-cli"
+    (state2 / "builtin").mkdir(parents=True)
+    (state2 / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(tmp_path / "h2"))
+    with pytest.raises(UnsupportedPlatform, match="bin"):
+        wrap("agy", ["agy"], tmp_path)
 
 
 def _agy_token_home(tmp_path_factory, monkeypatch):

@@ -219,7 +219,11 @@ bubblewrap (`bwrap`) layout:
 - **State directory writable, config locked.** The vendor must be able to
   write its own state, so that directory is writable, but the entries a later
   unsandboxed run would load stay read-only:
-  - agy, `~/.gemini/antigravity-cli`: `settings.json`, `bin`, `builtin`.
+  - agy, `~/.gemini/antigravity-cli`: `settings.json`, `builtin`. `bin` is
+    covered by a throwaway copy per round instead (agy rewrites
+    `bin/agentapi` before every shell command, so the copy lets that write
+    succeed; the host file is unchanged and the copy is deleted when the
+    round ends).
   - codex, `$CODEX_HOME` (default `~/.codex`): `config.toml`, `AGENTS.md`,
     `hooks`, `rules`, `skills`, `plugins`, `agents`, and every
     `*.config.toml` profile file. `config.toml` and `hooks` must exist,

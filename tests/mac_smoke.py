@@ -2,7 +2,8 @@
 
     uv run python tests/mac_smoke.py
 
-Part 1 runs a probe under the exact wrap() line for each vendor and checks what it can and cannot touch.
+Part 1 runs a probe under the exact wrap() line for agy and checks what it can and cannot touch (codex keeps
+only its own Seatbelt sandbox on macOS, so there is no xv line to probe).
 Part 2 runs real xv rounds (agy and codex, one follow-up each). Prints PASS/FAIL per check; exit 1 on any FAIL.
 Nothing on the host is changed: write probes open existing files for append without writing, and files the
 probes create live in the round's tmpdir or are removed again.
@@ -56,8 +57,11 @@ attempt("dns", lambda: socket.getaddrinfo("example.com", 443))
 attempt("signal_parent", lambda: os.kill(spec["outside_pid"], 0))
 r = subprocess.run(["/usr/bin/osascript", "-e", 'tell application "Finder" to get name'], capture_output=True, text=True)
 out["osascript"] = "ok" if r.returncode == 0 else f"rc={r.returncode} {r.stderr.strip()[:120]}"
-r = subprocess.run(["/bin/ps", "-p", str(spec["outside_pid"])], capture_output=True, text=True)
-out["ps_outside"] = "ok" if str(spec["outside_pid"]) in r.stdout else "hidden"
+try:  # ps is setuid root; the sandbox may refuse to exec it at all
+    r = subprocess.run(["/bin/ps", "-p", str(spec["outside_pid"])], capture_output=True, text=True)
+    out["ps_outside"] = "ok" if str(spec["outside_pid"]) in r.stdout else "hidden"
+except OSError as e:
+    out["ps_outside"] = f"ps not runnable: {e}"
 out["home"] = os.environ.get("HOME")
 out["tmux"] = os.environ.get("TMUX")
 print(json.dumps(out))
@@ -132,14 +136,6 @@ def part1() -> None:
         if got:  # informational: no pid namespace on macOS (known gap)
             print(f"INFO  agy: ps sees processes outside the sandbox: {got['ps_outside']}")
 
-    codex = isolation.state_dir("codex")
-    with tempfile.TemporaryDirectory(prefix="xv-smoke-") as t:
-        got = probe("codex", {"append": {"write_real_config": str(codex / "config.toml")},
-                              "create": {"create_in_hooks": str(codex / "hooks" / "xv-smoke"),
-                                         "create_outside_home": str(outside)},
-                              "read": secrets}, Path(t))
-        for name in ("write_real_config", "create_in_hooks", "create_outside_home", *secrets):
-            expect("codex", got, name, False)
 
 
 def xv(*args: str, timeout: int = 600) -> subprocess.CompletedProcess:

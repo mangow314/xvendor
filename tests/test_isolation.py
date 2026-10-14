@@ -13,8 +13,9 @@ from xvendor.isolation import UnsupportedPlatform, wrap
 needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
 
 
-def test_codex_passthrough_off_linux(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(isolation.sys, "platform", "win32")
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_codex_passthrough_off_linux(tmp_path, monkeypatch, capsys, platform):
+    monkeypatch.setattr(isolation.sys, "platform", platform)
     argv = ["codex", "exec", "-s", "read-only", "hi"]
     assert wrap("codex", argv, tmp_path) == argv
     assert "runs without xv isolation" in capsys.readouterr().err
@@ -179,6 +180,18 @@ def seatbelt_params(argv):
     return out
 
 
+def fake_agy_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    state = home / ".gemini" / "antigravity-cli"
+    (state / "bin").mkdir(parents=True)
+    (state / "bin" / "agentapi").write_text("orig")
+    (state / "builtin").mkdir()
+    (state / "conversations").mkdir()
+    (state / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    return home, state
+
+
 def test_seatbelt_rejected_without_sandbox_exec(tmp_path, monkeypatch):
     monkeypatch.setattr(isolation.sys, "platform", "darwin")
     monkeypatch.setattr(isolation, "SANDBOX_EXEC", str(tmp_path / "nope"))
@@ -188,17 +201,9 @@ def test_seatbelt_rejected_without_sandbox_exec(tmp_path, monkeypatch):
 
 def test_seatbelt_agy_layout(tmp_path, monkeypatch):
     sbx = on_darwin(tmp_path, monkeypatch)
-    home = tmp_path / "home"
-    (home / ".ssh").mkdir(parents=True)
-    (home / ".gemini").mkdir()
+    home, state = fake_agy_home(tmp_path, monkeypatch)
+    (home / ".ssh").mkdir()
     (home / ".gemini" / "oauth_creds.json").write_text("{}")
-    state = home / ".gemini" / "antigravity-cli"
-    (state / "bin").mkdir(parents=True)
-    (state / "bin" / "agentapi").write_text("orig")
-    (state / "builtin").mkdir()
-    (state / "conversations").mkdir()
-    (state / "settings.json").write_text("{}")
-    monkeypatch.setenv("HOME", str(home))
     tmp = tmp_path / "agytmp"
     tmp.mkdir()
     argv = wrap("agy", ["agy", "-p", "hi"], tmp)
@@ -234,17 +239,6 @@ def test_seatbelt_agy_refused_when_bin_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     with pytest.raises(UnsupportedPlatform, match="bin"):
         wrap("agy", ["agy"], tmp_path / "t")
-
-
-def test_seatbelt_codex_layout(tmp_path, monkeypatch):
-    _, state = fake_codex_home(tmp_path, monkeypatch)
-    on_darwin(tmp_path, monkeypatch)
-    params = seatbelt_params(argv := wrap("codex", ["codex", "exec", "hi"], tmp_path / "t"))
-    for name in ("config.toml", "hooks", "local.config.toml"):
-        assert params[str(state / name)][0].startswith("R")
-    assert str(state / "auth.json") not in params  # its own login stays readable
-    assert not any(a.startswith("HOME=") for a in argv)
-    assert argv[-3:] == ["codex", "exec", "hi"]
 
 
 def test_agy_rejected_without_bwrap(tmp_path, monkeypatch):
@@ -494,10 +488,10 @@ def test_write_argv_binds_dir(tmp_path, monkeypatch):
 
 @needs_git
 def test_seatbelt_write_dir(tmp_path, monkeypatch):
-    fake_codex_home(tmp_path, monkeypatch)
+    fake_agy_home(tmp_path, monkeypatch)
     on_darwin(tmp_path, monkeypatch)
     wt, gitdir = make_worktree(tmp_path)
-    params = seatbelt_params(wrap("codex", ["codex"], tmp_path / "t", wt))
+    params = seatbelt_params(wrap("agy", ["agy"], tmp_path / "t", wt))
     assert "W2" in params[str(wt)]
     assert params[str(wt / ".git")][0].startswith("R")
     assert not any(Path(p) == gitdir or gitdir in Path(p).parents for p in params)

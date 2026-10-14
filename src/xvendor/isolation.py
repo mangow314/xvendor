@@ -2,7 +2,8 @@
 # writable own state dir with config-like entries re-protected, writable tmpdir, secrets and sockets hidden.
 # codex's own inner sandbox (-s read-only) stays as a second layer. --unshare-pid gives the vendor its own pid
 # namespace: leftover background processes die with bwrap and host pids (/proc/<pid>/root) are invisible.
-# On macOS the same layout is a Seatbelt profile run by sandbox-exec (_seatbelt); codex runs unwrapped elsewhere.
+# On macOS agy gets the same layout as a Seatbelt profile run by sandbox-exec (_seatbelt). codex runs unwrapped off
+# Linux: on macOS its own -s read-only is itself a Seatbelt sandbox, and Seatbelt cannot be applied twice.
 import os
 import shutil
 import subprocess
@@ -67,11 +68,11 @@ def check(vendor: str) -> None:
     """Raise UnsupportedPlatform when vendor cannot be run read-only here (R3: refuse, never degrade)."""
     if vendor not in ("codex", "agy"):
         raise UnsupportedPlatform(f"no isolation defined for vendor {vendor!r}")
+    if vendor == "codex" and sys.platform != "linux":
+        return
     if sys.platform == "darwin":
         if not os.path.exists(SANDBOX_EXEC):
             raise UnsupportedPlatform(f"{vendor} needs {SANDBOX_EXEC} for read-only isolation; not found")
-        return
-    if vendor == "codex" and sys.platform != "linux":
         return
     if sys.platform != "linux":
         raise UnsupportedPlatform(f"{vendor} needs bubblewrap for read-only isolation; not available on {sys.platform}")
@@ -138,14 +139,12 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
     plus writable when given (--write mode)."""
     check(vendor)
     if vendor == "codex":
-        if sys.platform not in ("linux", "darwin"):
+        if sys.platform != "linux":
             print(f"xv: codex runs without xv isolation on {sys.platform}", file=sys.stderr)
             return list(argv)
         state = state_dir("codex")
         protect = list(CODEX_STATE_READONLY)
         extra = sorted(p.name for p in state.glob("*.config.toml")) if state.is_dir() else []
-        if sys.platform == "darwin":
-            return _seatbelt("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, writable)
         return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state, writable)
     state = state_dir("agy")
     if sys.platform == "darwin":

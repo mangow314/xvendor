@@ -178,6 +178,21 @@ def test_start_write_sets_meta(xv, data, tmp_path):
     assert f"write:{work.resolve()}" in xv("list").stdout
 
 
+def test_run_reports_nested_git(xv, data, tmp_path):
+    work = make_worktree(tmp_path)
+    (work / "sub" / ".git").mkdir(parents=True)
+    job = xv("start", "codex", "-m", "q", "--no-pane", "--write", work).stdout.strip()
+    xv("wait", job)
+    meta_path = data / "jobs" / job / "meta.json"
+    for _ in range(50):  # the runner marks the job done just before the runner process records nested_git
+        meta = json.loads(meta_path.read_text())
+        if "nested_git" in meta:
+            break
+        time.sleep(0.1)
+    assert meta["nested_git"] == [str(work.resolve() / "sub" / ".git")]
+    assert "nested git" in xv("show", job).stderr
+
+
 def test_start_write_refuses_second_writer(xv, tmp_path):
     work = make_worktree(tmp_path)
     first = xv("start", "codex", "-m", "q", "--no-pane", "--write", work, XV_FAKE_DELAY=30)

@@ -180,6 +180,8 @@ def cmd_show(store: JobStore, args) -> int:
     path = store.round_dir(job, n) / "response.md"
     if not path.is_file():
         raise Fail(f"round {n} has no response: {path}")
+    if nested := store.meta(job).get("nested_git"):
+        print("xv: nested git repositories: " + ", ".join(nested), file=sys.stderr)
     sys.stdout.write(path.read_text(encoding="utf-8"))
     return 0
 
@@ -248,6 +250,12 @@ def cmd_run(store: JobStore, args) -> int:
     try:
         runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event,
                          popen_env=runner.scrub_env(os.environ))
+        if meta.get("mode") == "write":
+            nested = [str(x) for x in isolation.nested_git(Path(meta["writable"]))]
+            store.update(job, nested_git=nested)
+            if nested:
+                display.warn(f"nested git repositories under {meta['writable']} "
+                             "(do not git add them; remove them first): " + ", ".join(nested))
         _finish(display, store, job, n)
     except Exception as e:  # runner already marked the job failed; keep the message visible
         print(f"xv: _run failed: {e}", file=sys.stderr)

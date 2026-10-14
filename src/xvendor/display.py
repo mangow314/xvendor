@@ -37,6 +37,9 @@ class Display:
         self._print(line)
         self.console.print(Rule())
 
+    def warn(self, text: str) -> None:
+        self._print(Text(f"xv: {text}", style="red"))
+
     def event(self, e: Event) -> None:
         if e.kind not in LABEL:
             return

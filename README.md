@@ -141,8 +141,12 @@ the other model's output, data rather than instructions.
 a linked worktree (`git worktree add <dir> -b <branch>`): a plain directory,
 a repository root, and `--separate-git-dir` or submodule layouts are refused,
 and so is a `DIR` under a path `xv` hides or under the vendor's state
-directory. The vendor can run `git status` and `git diff`, but not `git add`
-or `git commit`. Do not touch `DIR` yourself while a round is running. When
+directory. The vendor can run `git status` and `git diff`, but not `git add`,
+`git commit` or switch branches. The vendor can still create a nested
+repository (`sub/.git/`) inside `DIR`; its config is run by your git after you
+`git add` it and run the next `git status`. When a round ends `xv` lists every
+nested `.git` under `DIR` (and records them in the job's meta as `nested_git`;
+`xv show` repeats the warning): delete them before you `git add`. Do not touch `DIR` yourself while a round is running. When
 `xv wait` returns, review with `git -C DIR diff`, then commit and merge
 yourself. Only one job at a time may write a given `DIR`; a second
 `xv start` is refused. `ask` keeps the write directory set by `start`.
@@ -167,11 +171,11 @@ bubblewrap (`bwrap`) layout:
 - **Read-only root.** The whole filesystem is mounted read-only. The only
   writable places are the vendor's own state directory, a per-round temp
   directory (deleted afterwards, exported as `TMPDIR`), and, in write mode,
-  `DIR` and the gitdir its `.git` file points to (`DIR` must be a linked
-  worktree). But the `DIR/.git` pointer file and the gitdir's `commondir`,
-  `gitdir` and `config.worktree` stay read-only, so the vendor cannot point
-  the worktree at a git dir of its own and have your next git command run
-  its config.
+  `DIR` (a linked worktree; `DIR/.git` must not be a symlink and the main
+  repository must not sit inside `DIR`). The worktree's whole git directory
+  stays read-only, `DIR/.git` included, so the vendor cannot `git add`
+  (gitlinks too), commit, switch branches, or change any setting your git
+  reads.
 - **`/run` and X11 hidden.** `/run`, `/tmp/.X11-unix` and the default tmux
   socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
   empty in-memory folders. A read-only mount does not stop `connect()` to a

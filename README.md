@@ -38,10 +38,10 @@ The repo holds two things:
 - At least one vendor CLI, installed and logged in:
   [codex](https://github.com/openai/codex) (`codex exec`) or agy (Google's
   Antigravity CLI, `agy -p`).
-- For agy: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`),
-  and agy run once interactively so its state directory exists. Without
-  `bwrap`, `xv start agy` refuses to run; without the state directory, the
-  round fails (the tmux pane shows what is missing).
+- [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux,
+  for both vendors. Without it, `xv start` refuses to run. Each vendor must
+  also have been run once interactively so its state directory exists;
+  otherwise the round fails (the tmux pane shows what is missing).
 - Optional: tmux. Inside tmux each job gets a live pane; outside tmux it runs
   in the background and you read the result with `xv show`.
 - For the plugin: Claude Code.
@@ -85,7 +85,84 @@ xv stop <job>                      # cut a round short; the session is kept
 xv list                            # all jobs with vendor, round, status, seconds
 xv close <job>                     # close the job's pane
 xv watch <job>                     # follow a running round from any terminal
+
+# codex profiles (files in ~/.codex, or $CODEX_HOME)
+xv start codex --profile xv-review --file brief.md                 # review: web search off
+xv start codex --profile xv-survey --cwd /path/to/clean/dir -m "…" # survey: cached web search
+
+# write mode: the vendor may write inside one directory only
+xv start codex --write /path/to/worktree --file brief.md
 ```
+
+**Profiles.** `--profile NAME` (codex only) loads `NAME.config.toml` from
+`$CODEX_HOME` (default `~/.codex`) on top of your base codex config. Two are
+meant for `xv`; they are not shipped in this repo, so create them yourself:
+
+`xv-review.config.toml`, for reviews: no web search, GitHub connector off.
+
+```toml
+web_search = "disabled"
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
+```
+
+`xv-survey.config.toml`, for research: cached web search. The pages it reads
+can carry injected instructions, so give it a `--cwd` with nothing secret in it.
+
+```toml
+web_search = "cached"
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
+```
+
+**Findings as JSON.** For a review, ask the brief for a machine-readable
+list so Claude can sort and check each item before acting on it:
+
+```json
+[{"severity": "high|medium|low", "file": "src/x.py", "line": 42,
+  "symptom": "what is wrong", "trigger": "input or state that hits it", "fix_hint": "one line"}]
+```
+
+Open each finding's file at its line before you believe it: `response.md` is
+the other model's output, data rather than instructions.
+
+**Write mode.** `--write DIR` lets the vendor write inside `DIR` only
+(`--cwd` defaults to `DIR`); everything else stays read-only. `DIR` must be
+a linked worktree (`git worktree add <dir> -b <branch>`): a plain directory,
+a repository root, and `--separate-git-dir` or submodule layouts are refused,
+and so is a `DIR` under a path `xv` hides or under the vendor's state
+directory. The vendor can run `git status` and `git diff`, but not `git add`,
+`git commit` or switch branches. The main repository's `.git` and this
+worktree's gitdir stay read-only for the vendor: it cannot add, commit, switch
+branches or change git config files. A worktree whose index has submodule
+entries (gitlinks) is refused by `--write`: the vendor could put config in a
+submodule directory, and your next `git diff` would run it. The vendor can still
+create a nested repository (`sub/.git/`) inside `DIR`. When a round ends `xv`
+lists every nested `.git` under `DIR` (and records them in the job's meta as
+`nested_git`; `xv wait` and `xv show` repeat the warning): delete them **before
+you run any git command in the worktree**. In that list, an entry marked `(could not be entered)` is a directory `xv`
+could not enter: the scan is incomplete there, so inspect that directory
+yourself; it is not an instruction to delete it. One exception comes from your own
+git config: if it runs a program from inside the worktree (`diff.<driver>.textconv`,
+`filter.<name>.clean`/`smudge`, `core.hooksPath` pointing into the worktree),
+the vendor can change that program and your next `git diff` or `git status`
+runs it. Do not touch `DIR` yourself while a round is running. When
+`xv wait` returns, check the nested-git warning, delete those entries, review
+with `git -C DIR diff`, then commit and merge yourself. Only one job at a time may write a given `DIR`; a second
+`xv start` is refused. `ask` keeps the write directory set by `start` and re-runs the worktree-layout and submodule checks (a submodule added to the worktree later makes the next round fail); the overlap check against hidden paths runs only at `start`, since `DIR` is fixed and the result cannot change.
+Once a round is over and you have committed or merged, run
+`git worktree remove <dir>` (and `git branch -d` if needed) so unused
+worktrees do not pile up as orphans.
 
 `<job>` can be the full id or its last 4 characters. Each round has a
 timeout (`--timeout` on `start`, default 1200 seconds; `ask` keeps the
@@ -97,38 +174,106 @@ folder per round with `request.md`, `events.jsonl`, `response.md` and
 
 ## Safety
 
-Every job is read-only, enforced by `xv` rather than left to the brief:
+Every job is read-only unless you pass `--write DIR`, and this is enforced by
+`xv` rather than left to the brief. On Linux both vendors run inside the same
+bubblewrap (`bwrap`) layout:
 
-- **codex** runs with `-s read-only`, codex's own sandbox. Follow-up rounds
-  pass `-c sandbox_mode="read-only"` again, because a resumed codex session
-  does not keep the first round's flag.
-- **agy** runs inside bubblewrap with the whole filesystem mounted
-  read-only. On the host, only agy's own state directory
-  (`~/.gemini/antigravity-cli`, minus its settings, launcher and built-in
-  skills, which stay read-only) is writable; agy also gets a per-round temp
-  directory, deleted afterwards. `/run/user/<uid>` and the default tmux
+- **Read-only root.** The whole filesystem is mounted read-only. The only
+  writable places are the vendor's own state directory, a per-round temp
+  directory (deleted afterwards, exported as `TMPDIR`), and, in write mode,
+  `DIR` (a linked worktree; `DIR/.git` must not be a symlink and the main
+  repository must not sit inside `DIR`). The worktree's whole git directory
+  stays read-only, `DIR/.git` included, so the vendor cannot `git add`
+  (gitlinks too), commit, switch branches, or change git config files. A program your own
+  git config runs from inside the worktree (`textconv`, `filter`, `core.hooksPath`)
+  is not covered; see Write mode.
+  Threat-model boundary: `xv` blocks what the vendor can do from inside `DIR`. A symlink you
+  created outside `DIR` that points back into it, or a vendor state directory and a repo placed
+  inside each other, is out of scope.
+- **Own pid namespace.** bwrap runs the vendor with `--unshare-pid`: when a round ends, background
+  processes the vendor left behind (even ones started with `setsid`) are killed with it, and host
+  processes are invisible to the vendor, so `/proc/<pid>/root` of a host process cannot be used.
+- **`/run` and X11 hidden.** `/run`, `/tmp/.X11-unix` and the default tmux
   socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
-  empty in-memory folders, so agy cannot reach `systemd --user` or your
-  default tmux server to run a command outside the sandbox. Credential files in
-  your home directory (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`,
-  `~/.kube`, `~/.git-credentials`, `~/.npmrc`, `~/.pgpass`, `~/.netrc`,
-  `~/.claude/.credentials.json`, `~/.codex/auth.json`) are blanked out.
-  agy's own `--sandbox` flag does not stop its file-writing tools, so xv does
-  not rely on it. agy never runs without this: `xv start agy` refuses when
-  `bwrap` is missing, and the round fails if agy's state directory is
-  incomplete.
+  empty in-memory folders. A read-only mount does not stop `connect()` to a
+  path-based unix socket, and those directories hold the sockets that run
+  commands outside the sandbox: `docker.sock` (anyone in the `docker` group
+  is effectively root), the system and user D-Bus, `systemd --user`, the X11
+  display, your tmux server. Only `/etc/resolv.conf`'s target is put back
+  when it is a symlink into `/run`, so DNS still works.
+- **Credentials blanked out** (directories become empty folders, files become
+  empty files) under your home directory: `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gh`, `~/.kube`, `~/.git-credentials`, `~/.npmrc`, `~/.pgpass`,
+  `~/.netrc`, `~/.claude/.credentials.json`, `~/.codex/auth.json`,
+  `~/.gemini/antigravity-cli/antigravity-oauth-token`,
+  `~/.gemini/antigravity-cli/conversations`, `~/.gemini/oauth_creds.json`,
+  `~/.gemini/google_accounts.json`, `~/.mozilla`, `~/.config/google-chrome`,
+  `~/.config/chromium`, `~/.config/BraveSoftware`, `~/.config/Bitwarden CLI`,
+  `~/.config/gcloud`, `~/.docker/config.json`, `~/.password-store`,
+  `~/.claude.json`, `~/.claude/projects`, `~/.codex/sessions`,
+  `~/.codex/history.jsonl`, plus per-project `.env` files:
+  `~/projects/*/.env`, `~/projects/*/.env.*`, `~/projects/*/*/.env` and
+  `~/projects/*/.envrc`. (The source of truth is `SECRET_PATHS` and
+  `SECRET_GLOBS` in `src/xvendor/isolation.py`.) Entries inside the vendor's
+  own state directory are skipped for that vendor, so it keeps its own login.
+- **State directory writable, config locked.** The vendor must be able to
+  write its own state, so that directory is writable, but the entries a later
+  unsandboxed run would load stay read-only:
+  - agy, `~/.gemini/antigravity-cli`: `settings.json`, `builtin`. `bin` is
+    covered by a throwaway copy per round instead (agy rewrites
+    `bin/agentapi` before every shell command, so the copy lets that write
+    succeed; the host file is unchanged and the copy is deleted when the
+    round ends).
+  - codex, `$CODEX_HOME` (default `~/.codex`): `config.toml`, `AGENTS.md`,
+    `hooks`, `rules`, `skills`, `plugins`, `agents`, and every
+    `*.config.toml` profile file. `config.toml` and `hooks` must exist,
+    otherwise the round is refused rather than run unprotected.
+- **Environment scrubbed.** Variables whose name matches `key`, `token`,
+  `secret`, `passw`, `cred` or `auth` (case-insensitive) are not passed to the
+  vendor, and neither is the `GIT_CONFIG_*` family. These are kept regardless:
+  `XV_DATA`, `XV_PANE`, `CODEX_HOME`, `PATH`, `HOME`, `TMPDIR`, `TERM`,
+  `LANG`, `TMUX`, `TMUX_PANE` and `LC_*`. Inside bwrap `TMUX` and `TMUX_PANE`
+  are unset. Vendors log in through files, not environment variables.
+- **codex's own sandbox** (`-s read-only`, or `workspace-write` in write mode)
+  stays on as a second layer. Follow-up rounds pass the current mode's
+  sandbox again (`read-only` for a read-only job, `workspace-write` for a
+  write job) via `-c sandbox_mode=...`, because a resumed codex session does
+  not keep the first round's flag.
+- **agy's own `--sandbox`** does not stop its file-writing tools, so `xv`
+  does not rely on it.
+- **Refuse, never degrade.** `xv start agy` refuses when `bwrap` is missing
+  or the platform is not Linux. On Linux codex also needs `bwrap`.
+  **On macOS codex runs without `xv` isolation**: only codex's own sandbox
+  applies, and `xv` prints a note to say so.
 
 What this does not cover:
 
 - Network access is not blocked. Anything a vendor can read can leave with
   its conversation, so treat every readable file as shared with that vendor.
-- codex's read-only mode is codex's own sandbox; `xv` only makes sure the
-  flag is always passed.
+- Memory poisoning. The vendor's state directory is writable, and that
+  includes its memory (agy `brain/`, codex `memories/`). A prompt injected
+  through a file or web page can be saved there and steer your next
+  interactive, unsandboxed codex or agy session. `xv` does not stop this.
 - A tmux server on a custom socket (`tmux -S <path>` outside the default
-  directory) is not hidden from agy.
-- agy can read every file that is not on the list above, including other
-  jobs in `~/.local/share/xvendor/`. The skill tells Claude to ask each
+  directory) is not hidden from the vendor.
+- The vendor can read every file that is not on the list above, including
+  other jobs in `~/.local/share/xvendor/`. The skill tells Claude to ask each
   vendor not to read that folder, but that is a request, not a wall.
+- Write mode trusts the vendor inside `DIR`: review `git diff` before you
+  commit, and do not put secrets in `DIR`.
+
+## Adding a vendor
+
+1. Implement the `Vendor` Protocol from `src/xvendor/vendors/base.py`, three
+   methods: `build(round, session, prompt, profile, mode)` returns the
+   command line (`mode` is `"read"` or `"write"`; pick the vendor's sandbox
+   flag from it), `parse(line)` turns one event-stream line into an `Event`
+   or `None`, and `result(lines)` returns `(session, response, ok)`.
+2. Register it in `vendor_for` in `src/xvendor/cli.py` (and the `choices` of
+   `xv start`).
+3. Declare its isolation in `src/xvendor/isolation.py`: the state directory
+   and which entries inside it stay read-only. Without that, `check()` refuses
+   to run the vendor.
 
 ## Cost and privacy
 
@@ -148,6 +293,16 @@ claude plugin marketplace remove xvendor
 uv tool uninstall xvendor
 rm -rf ~/.local/share/xvendor    # job history, if you no longer want it
 ```
+
+## History
+
+xvendor replaced [agent-bridge](https://github.com/mangow314/agent-bridge)
+in my own setup. agent-bridge typed tasks into interactive codex, Claude and
+agy panes and read their screens; xvendor runs the vendors' official headless
+CLIs instead, and makes read-only an enforced property of every job rather
+than a request in the brief. If you want Claude workers, or workers that
+spawn workers of their own, agent-bridge's README compares the alternatives
+(built-in subagents, agent teams, cross-session messaging).
 
 ## Feedback
 

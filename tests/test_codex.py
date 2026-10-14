@@ -11,6 +11,11 @@ FLAGGED = ("This content was flagged for possible cybersecurity risk. If this se
            "https://platform.openai.com/settings/organization/status-and-access before retrying.")
 
 
+ROOTS = ["-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+         "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+         "-c", "sandbox_workspace_write.writable_roots=[]"]
+
+
 @pytest.fixture
 def v():
     return CodexVendor()
@@ -42,6 +47,23 @@ def test_build_resume_profile(v):
     assert v.build(3, "sid-1", "again", "local") == [
         "codex", "-p", "local", "exec", "resume", "-c", 'sandbox_mode="read-only"', "--skip-git-repo-check",
         "--json", "sid-1", "again"]
+
+
+def test_build_write_mode(v):
+    assert v.build(1, None, "hi", None, mode="write") == [
+        "codex", "exec", "-s", "workspace-write", *ROOTS, "--skip-git-repo-check", "--json", "hi"]
+    assert v.build(2, "sid-1", "again", None, mode="write") == [
+        "codex", "exec", "resume", "-c", 'sandbox_mode="workspace-write"', *ROOTS, "--skip-git-repo-check",
+        "--json", "sid-1", "again"]
+    assert v.build(1, None, "hi", None, mode="read") == v.build(1, None, "hi", None)
+
+
+def test_write_mode_codex_sandbox_roots(v):
+    for argv in (v.build(1, None, "hi", None, mode="write"), v.build(2, "sid-1", "again", None, mode="write")):
+        for value in ROOTS[1::2]:
+            assert argv[argv.index(value) - 1] == "-c"
+    for argv in (v.build(1, None, "hi", None), v.build(2, "sid-1", "again", None)):
+        assert not any("sandbox_workspace_write" in a for a in argv)
 
 
 # parse

@@ -6,6 +6,7 @@ Env:
   XV_FAKE_RC        exit code (default 0)
   XV_FAKE_DELAY     seconds to sleep before each line (default 0)
   XV_FAKE_ARGV_OUT  if set, write sys.argv[1:] as JSON to this file
+  XV_FAKE_ENV_OUT   if set, write the environment (one NAME=value per line) to this file
 SIGTERM exits with rc 143.
 """
 import json
@@ -19,6 +20,10 @@ signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 if out := os.environ.get("XV_FAKE_ARGV_OUT"):
     with open(out, "w", encoding="utf-8") as f:
         json.dump(sys.argv[1:], f)
+
+if out := os.environ.get("XV_FAKE_ENV_OUT"):
+    with open(out, "w", encoding="utf-8") as f:
+        f.writelines(f"{k}={v}\n" for k, v in os.environ.items())
 
 delay = float(os.environ.get("XV_FAKE_DELAY", "0"))
 if fixture := os.environ.get("XV_FAKE_FIXTURE"):

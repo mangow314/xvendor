@@ -27,12 +27,18 @@ class Display:
         # soft_wrap: let the terminal wrap long lines instead of Rich inserting newlines
         self.console.print(text, markup=False, highlight=False, soft_wrap=True)
 
-    def header(self, vendor: str, job: str, n: int, timeout: int) -> None:
+    def header(self, vendor: str, job: str, n: int, timeout: int, mode: str = "read",
+               writable: str | None = None) -> None:
         line = Text()
         line.append(vendor, style=VENDOR_STYLE.get(vendor, ""))
         line.append(f" | {job[-4:]} | round {n} | limit {(timeout + 59) // 60} min")
+        if mode == "write":
+            line.append(f" | write {writable}", style="red")
         self._print(line)
         self.console.print(Rule())
+
+    def warn(self, text: str) -> None:
+        self._print(Text(f"xv: {text}", style="red"))
 
     def event(self, e: Event) -> None:
         if e.kind not in LABEL:

@@ -221,3 +221,28 @@ def test_list_sorted_by_id(store, tmp_path):
     listed = store.list()
     assert [j for j, _ in listed] == sorted([a, early])
     assert dict(listed)[a] == store.meta(a)
+
+
+# --write fields
+
+def test_create_write_meta_and_running_writable(store):
+    job = store.create("codex", "/w", 600, False, None, "q", "/w")
+    m = store.meta(job)
+    assert (m["mode"], m["writable"]) == ("write", "/w")
+    assert store.running_writable("/w")
+    assert not store.running_writable("/other")
+    store.update(job, status="done")
+    assert not store.running_writable("/w")
+    m = store.meta(new_job(store))
+    assert (m["mode"], m["writable"]) == ("read", None)
+
+
+def test_old_meta_without_mode_fields(store):
+    job = new_job(store)
+    path = store.jobs / job / "meta.json"
+    m = json.loads(path.read_text())
+    del m["mode"], m["writable"]
+    path.write_text(json.dumps(m))
+    m = store.meta(job)
+    assert m.get("mode", "read") == "read" and m.get("writable") is None
+    assert not store.running_writable("/work/dir")

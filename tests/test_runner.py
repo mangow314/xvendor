@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -13,6 +14,22 @@ from xvendor.vendors.agy import AgyVendor
 from xvendor.vendors.codex import CodexVendor
 
 needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
+
+
+@pytest.fixture(autouse=True)
+def codex_home(tmp_path, monkeypatch):
+    """Minimal ~/.codex and agy state so vendors pass isolation.check; without bwrap, wrap becomes a passthrough."""
+    home = tmp_path / "home"
+    (home / ".codex" / "hooks").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text("")
+    agy = home / ".gemini" / "antigravity-cli"
+    (agy / "bin").mkdir(parents=True)
+    (agy / "builtin").mkdir()
+    (agy / "settings.json").write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    if sys.platform != "linux" or shutil.which("bwrap") is None:
+        monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
 
 
 @pytest.fixture
@@ -61,7 +78,9 @@ def test_codex_done(store, tmp_path, env, fixture_path):
     assert (rd / "response.md").read_text(encoding="utf-8").startswith("### Data directory paths")
 
 
-def test_argv_reaches_cli(store, tmp_path, env, fixture_path):
+def test_argv_reaches_cli(store, tmp_path, env, fixture_path, monkeypatch):
+    # the fake writes argv.json outside the sandbox's writable dirs, so check argv without bwrap
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
     job = new_job(store, tmp_path)
     out = tmp_path / "argv.json"
     runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"), XV_FAKE_ARGV_OUT=out))
@@ -161,3 +180,42 @@ def test_stop_rejects_missing_pgid(store, tmp_path):
     job = new_job(store, tmp_path)
     with pytest.raises(JobError, match="try again"):
         runner.stop(store, job)
+
+
+def test_scrub_env():
+    environ = {"PATH": "/x", "JINA_API_KEY": "a", "CLOUDSDK_PROXY_PASSWORD": "b", "GITHUB_TOKEN": "c",
+               "AWS_SECRET_ACCESS_KEY": "d", "MY_CREDENTIALS": "e", "OAUTH_THING": "f", "XV_DATA": "/d",
+               "CODEX_HOME": "/c", "LC_ALL": "C", "EDITOR": "nvim"}
+    assert set(runner.scrub_env(environ)) == {"PATH", "XV_DATA", "CODEX_HOME", "LC_ALL", "EDITOR"}
+
+
+def test_scrub_env_drops_git_config_family():
+    environ = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "1",
+               "GIT_CONFIG_PARAMETERS": "'a.b=1'", "PATH": "/x", "GIT_EDITOR": "true"}
+    out = runner.scrub_env(environ)
+    assert not any(k.startswith("GIT_CONFIG_") for k in out)
+    assert {"PATH", "GIT_EDITOR"} <= set(out)
+
+    if not shutil.which("git"):
+        pytest.skip("git not installed")
+    env = runner.scrub_env({**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "x.y",
+                            "GIT_CONFIG_VALUE_0": "1"})
+    r = subprocess.run(["git", "status", "--short"], env=env, cwd=os.path.dirname(__file__),
+                       capture_output=True)
+    assert r.returncode == 0
+
+
+def test_nested_git_written_on_failed_round(store, tmp_path, env, fixture_path, monkeypatch):
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
+    work = tmp_path / "wt"
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    (work / "sub" / ".git").mkdir(parents=True)
+    job = store.create("codex", str(work), 30, True, None, "question", writable=str(work))
+
+    def boom(event):
+        raise RuntimeError("display went away")
+    with pytest.raises(RuntimeError, match="display went away"):
+        runner.run_round(store, job, 1, CodexVendor(), boom, popen_env=env(fixture_path("codex-done")))
+    m = store.meta(job)
+    assert m["status"] == "failed"
+    assert m["nested_git"] == [str(work / "sub" / ".git")]

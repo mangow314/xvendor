@@ -1,19 +1,33 @@
 import os
+import re
 import shutil
 import signal
 import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from xvendor.events import Event
-from xvendor.isolation import wrap
+from xvendor.isolation import UnsupportedPlatform, has_gitlinks, nested_git, wrap
 from xvendor.jobs import JobError, JobStore
 from xvendor.vendors.base import Vendor
 
 KILL_GRACE = 10  # seconds between SIGTERM and SIGKILL, like `timeout -k 10`
+SECRET_ENV = re.compile(r"(?i)key|token|secret|passw|cred|auth")
+KEEP_ENV = ("XV_DATA", "XV_PANE", "CODEX_HOME", "PATH", "HOME", "TMPDIR", "TERM", "LANG", "TMUX", "TMUX_PANE")
+
+
+def scrub_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Drop variables whose name looks like a credential; vendors log in through files, not env.
+
+    The GIT_CONFIG_* family goes as a whole: dropping only GIT_CONFIG_KEY_n leaves
+    GIT_CONFIG_COUNT behind and git then refuses to run (rc 128).
+    """
+    return {k: v for k, v in environ.items()
+            if not k.startswith("GIT_CONFIG_")
+            and (k in KEEP_ENV or k.startswith("LC_") or not SECRET_ENV.search(k))}
 
 
 def _killpg(pgid: int, sig: int) -> None:
@@ -31,13 +45,24 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     rd = store.round_dir(job, n)
     prompt = (rd / "request.md").read_text(encoding="utf-8").rstrip("\n")
     store.update(job, run_pid=os.getpid())
-    tmpdir = Path(tempfile.mkdtemp(prefix="xv-agy-")) if vendor.name == "agy" else None
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"xv-{vendor.name}-"))
     proc = None
+    final: dict = {}
     timers: list[threading.Timer] = []
     timed_out = threading.Event()
     t0 = time.monotonic()
     try:
-        argv = wrap(vendor.name, vendor.build(n, meta["session"], prompt, meta["profile"]), tmpdir)
+        writable = Path(meta["writable"]) if meta.get("writable") else None
+        try:
+            built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
+            if meta.get("mode") == "write" and has_gitlinks(Path(meta["writable"])):
+                raise RuntimeError(f"{meta['writable']} now has submodule entries (gitlinks); refusing the write round")
+            argv = wrap(vendor.name, built, tmpdir, writable)
+        except (UnsupportedPlatform, ValueError, RuntimeError) as e:
+            msg = str(e)
+            (rd / "stderr.log").write_text(msg + "\n", encoding="utf-8")
+            final = {"status": "failed", "run_pid": None, "run_pgid": None, "error": msg}
+            raise
         lines: list[str] = []
         with open(rd / "stderr.log", "wb") as err, open(rd / "events.jsonl", "wb") as out:
             proc = subprocess.Popen(argv, cwd=meta["cwd"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -81,8 +106,8 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
             status = "failed"
         else:
             status = "done"
-        store.update(job, status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
-                     session=session or meta["session"])
+        final = dict(status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
+                     session=session or meta["session"], error=None)
         return status
     finally:
         for t in timers:
@@ -91,10 +116,14 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
         if proc is not None and proc.poll() is None:
             _killpg(proc.pid, signal.SIGKILL)
             proc.wait()
-        if tmpdir is not None:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        if store.meta(job)["status"] == "running":
-            store.update(job, status="failed", run_pid=None, run_pgid=None)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        # one update writes the final status and nested_git together: `wait` returns as soon as status leaves running
+        if not final and store.meta(job)["status"] == "running":
+            final = dict(status="failed", run_pid=None, run_pgid=None, error=None)
+        if meta.get("mode") == "write":
+            final["nested_git"] = nested_git(Path(meta["writable"]))
+        if final:
+            store.update(job, **final)
 
 
 def stop(store: JobStore, job: str) -> None:

@@ -203,3 +203,19 @@ def test_scrub_env_drops_git_config_family():
     r = subprocess.run(["git", "status", "--short"], env=env, cwd=os.path.dirname(__file__),
                        capture_output=True)
     assert r.returncode == 0
+
+
+def test_nested_git_written_on_failed_round(store, tmp_path, env, fixture_path, monkeypatch):
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
+    work = tmp_path / "wt"
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    (work / "sub" / ".git").mkdir(parents=True)
+    job = store.create("codex", str(work), 30, True, None, "question", writable=str(work))
+
+    def boom(event):
+        raise RuntimeError("display went away")
+    with pytest.raises(RuntimeError, match="display went away"):
+        runner.run_round(store, job, 1, CodexVendor(), boom, popen_env=env(fixture_path("codex-done")))
+    m = store.meta(job)
+    assert m["status"] == "failed"
+    assert m["nested_git"] == [str(work / "sub" / ".git")]

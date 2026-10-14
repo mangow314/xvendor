@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -118,7 +119,7 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
         "--tmpfs", str(home / ".ssh"), "--ro-bind", "/dev/null", str(home / ".netrc"),
         "--bind", st, st, "--ro-bind", f"{st}/settings.json", f"{st}/settings.json",
         "--ro-bind", f"{st}/bin", f"{st}/bin", "--ro-bind", f"{st}/builtin", f"{st}/builtin", "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
-        "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--die-with-parent", "--", "agy", "-p", "hi"]
+        "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--unshare-pid", "--die-with-parent", "--", "agy", "-p", "hi"]
 
 
 @needs_bwrap
@@ -604,3 +605,55 @@ def test_linked_worktree_rejects_repo_in_state(tmp_path):
     with pytest.raises(ValueError, match="vendor state dir"):
         isolation.linked_worktree_gitdir(wt, own_state=state)
     assert isolation.linked_worktree_gitdir(wt) is not None
+
+
+@needs_git
+def test_linked_worktree_rejects_state_inside_gitdir(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    with pytest.raises(ValueError, match="state dir"):
+        isolation.linked_worktree_gitdir(wt, own_state=gitdir / "codexhome")
+
+
+@needs_git
+def test_linked_worktree_rejects_symlink_chain_into_dir(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    original = (wt / ".git").read_text()
+    os.symlink(gitdir.parent, wt / "link")
+    (tmp_path / "outside").mkdir()
+    os.symlink(wt / "link", tmp_path / "outside" / "entry")
+    (wt / ".git").write_text(f"gitdir: {tmp_path}/outside/entry/wt\n")
+    with pytest.raises(ValueError, match="symlink inside"):
+        isolation.linked_worktree_gitdir(wt)
+    os.symlink(gitdir.parent, tmp_path / "outside" / "direct")  # chain never passes through DIR
+    (wt / ".git").write_text(f"gitdir: {tmp_path}/outside/direct/wt\n")
+    assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
+    (wt / ".git").write_text(original)
+
+
+@needs_git
+def test_linked_worktree_rejects_dotdot_after_component(tmp_path):
+    wt, gitdir = make_worktree(tmp_path)
+    (wt / "sub").mkdir()
+    (wt / ".git").write_text("gitdir: sub/../../main/.git/worktrees/wt\n")
+    with pytest.raises(ValueError, match="'..'"):
+        isolation.linked_worktree_gitdir(wt)
+    (wt / ".git").write_text("gitdir: ../main/.git/worktrees/wt\n")
+    assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
+
+
+@needs_bwrap
+@needs_git
+def test_real_bwrap_unshare_pid_kills_stragglers(tmp_path_factory, monkeypatch):
+    base = tmp_path_factory.mktemp("repo")
+    wt, _ = make_worktree(base)
+    _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
+    script = f"setsid -f sh -c 'sleep 1; echo late > {wt}/late.txt' >/dev/null 2>&1; exit 0"
+    argv = wrap("agy", ["sh", "-c", script], tmp, wt)
+    subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    time.sleep(2)
+    assert not (wt / "late.txt").exists()
+    # control: without --unshare-pid the straggler survives and writes (the test can tell the difference)
+    argv.remove("--unshare-pid")
+    subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    time.sleep(2)
+    assert (wt / "late.txt").exists()

@@ -157,7 +157,7 @@ the vendor can change that program and your next `git diff` or `git status`
 runs it. Do not touch `DIR` yourself while a round is running. When
 `xv wait` returns, check the nested-git warning, delete those entries, review
 with `git -C DIR diff`, then commit and merge yourself. Only one job at a time may write a given `DIR`; a second
-`xv start` is refused. `ask` keeps the write directory set by `start`.
+`xv start` is refused. `ask` keeps the write directory set by `start` and re-runs the same checks (a submodule added to the worktree later makes the next round fail).
 Once a round is over and you have committed or merged, run
 `git worktree remove <dir>` (and `git branch -d` if needed) so unused
 worktrees do not pile up as orphans.
@@ -185,6 +185,9 @@ bubblewrap (`bwrap`) layout:
   (gitlinks too), commit, switch branches, or change git config files. A program your own
   git config runs from inside the worktree (`textconv`, `filter`, `core.hooksPath`)
   is not covered; see Write mode.
+- **Own pid namespace.** bwrap runs the vendor with `--unshare-pid`: when a round ends, background
+  processes the vendor left behind (even ones started with `setsid`) are killed with it, and host
+  processes are invisible to the vendor, so `/proc/<pid>/root` of a host process cannot be used.
 - **`/run` and X11 hidden.** `/run`, `/tmp/.X11-unix` and the default tmux
   socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
   empty in-memory folders. A read-only mount does not stop `connect()` to a

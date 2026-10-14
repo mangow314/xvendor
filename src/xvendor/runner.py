@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from xvendor.events import Event
-from xvendor.isolation import nested_git, wrap
+from xvendor.isolation import has_gitlinks, nested_git, wrap
 from xvendor.jobs import JobError, JobStore
 from xvendor.vendors.base import Vendor
 
@@ -47,12 +47,15 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     store.update(job, run_pid=os.getpid())
     tmpdir = Path(tempfile.mkdtemp(prefix=f"xv-{vendor.name}-"))
     proc = None
+    final: dict = {}
     timers: list[threading.Timer] = []
     timed_out = threading.Event()
     t0 = time.monotonic()
     try:
         writable = Path(meta["writable"]) if meta.get("writable") else None
         built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
+        if meta.get("mode") == "write" and has_gitlinks(Path(meta["writable"])):
+            raise RuntimeError(f"{meta['writable']} now has submodule entries (gitlinks); refusing the write round")
         argv = wrap(vendor.name, built, tmpdir, writable)
         lines: list[str] = []
         with open(rd / "stderr.log", "wb") as err, open(rd / "events.jsonl", "wb") as out:
@@ -97,11 +100,8 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
             status = "failed"
         else:
             status = "done"
-        extra = {}
-        if meta.get("mode") == "write":
-            extra["nested_git"] = [str(p) for p in nested_git(Path(meta["writable"]))]
-        store.update(job, status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
-                     session=session or meta["session"], **extra)
+        final = dict(status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
+                     session=session or meta["session"])
         return status
     finally:
         for t in timers:
@@ -111,8 +111,13 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
             _killpg(proc.pid, signal.SIGKILL)
             proc.wait()
         shutil.rmtree(tmpdir, ignore_errors=True)
-        if store.meta(job)["status"] == "running":
-            store.update(job, status="failed", run_pid=None, run_pgid=None)
+        # one update writes the final status and nested_git together: `wait` returns as soon as status leaves running
+        if not final and store.meta(job)["status"] == "running":
+            final = dict(status="failed", run_pid=None, run_pgid=None)
+        if meta.get("mode") == "write":
+            final["nested_git"] = [str(p) for p in nested_git(Path(meta["writable"]))]
+        if final:
+            store.update(job, **final)
 
 
 def stop(store: JobStore, job: str) -> None:

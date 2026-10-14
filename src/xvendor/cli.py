@@ -116,14 +116,13 @@ def cmd_start(store: JobStore, args) -> int:
             isolation.linked_worktree_gitdir(Path(args.write), isolation.state_dir(args.vendor))
         except ValueError as e:
             raise Fail(str(e)) from None
-        ls = subprocess.run(["git", "-C", str(writable), "ls-files", "-s"], capture_output=True, text=True)
-        if ls.returncode != 0:
-            first = ls.stderr.strip().splitlines()[:1]
-            raise Fail(f"--write: git ls-files failed in {writable}: {first[0] if first else ''}")
-        if any(line.startswith("160000 ") for line in ls.stdout.splitlines()):
-            raise Fail(f"--write refuses {writable}: its index has submodule entries (gitlinks); a vendor could plant "
-                       "config in a submodule that your next git diff would run. Use a worktree of a repository "
-                       "without submodules")
+        try:
+            if isolation.has_gitlinks(writable):
+                raise Fail(f"--write refuses {writable}: its index has submodule entries (gitlinks); a vendor could plant "
+                           "config in a submodule that your next git diff would run. Use a worktree of a repository "
+                           "without submodules")
+        except ValueError as e:
+            raise Fail(f"--write: {e}") from None
     cwd = Path(args.cwd or writable or os.getcwd())
     if not cwd.is_dir():
         raise Fail(f"--cwd does not exist: {args.cwd}")

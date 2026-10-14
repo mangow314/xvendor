@@ -213,6 +213,21 @@ def test_start_write_refuses_gitlinks(xv, tmp_path):
     assert "submodule" in proc.stderr
 
 
+def test_ask_refuses_gitlinks_added_between_rounds(xv, data, tmp_path):
+    work = make_worktree(tmp_path)
+    job = xv("start", "codex", "-m", "q", "--no-pane", "--write", work).stdout.strip()
+    assert xv("wait", job).returncode == 0
+    sha = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    subprocess.run(["git", "-C", str(work), "update-index", "--add", "--cacheinfo", f"160000,{sha},sub"], check=True)
+    assert xv("ask", job, "-m", "again").returncode == 0
+    proc = xv("wait", job)
+    assert proc.returncode == 1
+    assert json.loads((data / "jobs" / job / "meta.json").read_text())["status"] == "failed"
+    log = (data / "jobs" / job / "round-2" / "stderr.log")
+    assert "gitlinks" in proc.stdout + proc.stderr + (log.read_text() if log.exists() else "")
+
+
 def test_start_write_refuses_second_writer(xv, tmp_path):
     work = make_worktree(tmp_path)
     first = xv("start", "codex", "-m", "q", "--no-pane", "--write", work, XV_FAKE_DELAY=30)

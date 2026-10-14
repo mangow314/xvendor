@@ -1,8 +1,10 @@
 # Read-only isolation for vendor CLIs. agy and codex share one bubblewrap layout (_bwrap): read-only root,
 # writable own state dir with config-like entries re-protected, writable tmpdir, secrets and sockets hidden.
-# codex's own inner sandbox (-s read-only) stays as a second layer. codex runs unwrapped on non-Linux.
+# codex's own inner sandbox (-s read-only) stays as a second layer. --unshare-pid gives the vendor its own pid
+# namespace: leftover background processes die with bwrap and host pids (/proc/<pid>/root) are invisible. codex runs unwrapped on non-Linux.
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -138,10 +140,21 @@ def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Pat
     text = dotgit.read_text(encoding="utf-8", errors="replace").strip()
     if not text.startswith("gitdir:"):
         raise bad(f"{dotgit} has no gitdir line")
-    raw = Path(os.path.join(writable, text.removeprefix("gitdir:").strip()))
+    ptext = text.removeprefix("gitdir:").strip()
+    parts = list(Path(ptext).parts)
+    while parts and parts[0] == "..":
+        parts.pop(0)
+    if ".." in parts:
+        raise bad(f"{dotgit} has a '..' after a real path component")
+    raw = Path(os.path.join(writable, ptext))
     for a in [raw, *raw.parents]:
-        if a.is_symlink() and Path(os.path.realpath(a.parent)).is_relative_to(writable.resolve()):
-            raise bad(f"{a} is a symlink inside {writable} on the gitdir path")
+        hop = a
+        for _ in range(40):
+            if not hop.is_symlink():
+                break
+            if Path(os.path.realpath(hop.parent)).is_relative_to(writable.resolve()):
+                raise bad(f"{hop} is a symlink inside {writable} on the gitdir path")
+            hop = Path(os.path.normpath(os.path.join(hop.parent, os.readlink(hop))))
     gitdir = raw.resolve()
     if not gitdir.is_dir():
         raise bad(f"{dotgit} points at {gitdir}, which is not a directory")
@@ -157,23 +170,36 @@ def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Pat
         raise bad(f"{common} lies inside {writable}: the repository itself would become writable")
     if own_state is not None and common.is_relative_to(own_state.resolve()):
         raise bad(f"{common} lies inside the vendor state dir {own_state}, which is writable for the vendor")
+    if own_state is not None and own_state.resolve().is_relative_to(common):
+        raise bad(f"the vendor state dir {own_state} lies inside {common}, which would make the repository metadata writable")
     if hit := _under_hidden(Path.home(), common):
         raise bad(f"{common} lies inside {hit}, which xv hides from the vendor")
     return gitdir
 
 
+def has_gitlinks(writable: Path) -> bool:
+    """True when the index of writable has submodule entries (mode 160000). Raise ValueError if git fails."""
+    ls = subprocess.run(["git", "-C", str(writable), "ls-files", "-s"], capture_output=True, text=True)
+    if ls.returncode != 0:
+        first = ls.stderr.strip().splitlines()[:1]
+        raise ValueError(f"git ls-files failed in {writable}: {first[0] if first else ''}")
+    return any(line.startswith("160000 ") for line in ls.stdout.splitlines())
+
+
 def nested_git(writable: Path) -> list[Path]:
-    """Every .git directory or file under writable other than writable/.git itself (sorted). Does not descend
-    into a .git directory and does not follow symlinks."""
+    """Every .git directory or file under writable other than writable/.git itself (sorted), plus directories
+    that could not be entered. Does not descend into a .git directory and does not follow symlinks."""
     top = writable / ".git"
     found = []
-    for root, dirs, files in os.walk(writable, followlinks=False):
+    errs: list[OSError] = []
+    for root, dirs, files in os.walk(writable, followlinks=False, onerror=errs.append):
         for d in list(dirs):
             if d == ".git":
                 dirs.remove(d)
                 if Path(root) / d != top:
                     found.append(Path(root) / d)
         found += [Path(root) / f for f in files if f == ".git" and Path(root) / f != top]
+    found += [Path(e.filename) for e in errs if e.filename]
     return sorted(found)
 
 
@@ -230,4 +256,4 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
         write += hide_after
     return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", *hide,
             "--bind", str(state), str(state), *protect, *write, "--bind", tmp, tmp, "--setenv", "TMPDIR", tmp,
-            "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--die-with-parent", "--", *argv]
+            "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--unshare-pid", "--die-with-parent", "--", *argv]

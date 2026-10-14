@@ -55,10 +55,10 @@ for name, p in spec.get("socket", {}).items():
     attempt(name, lambda p=p: connect(p))
 attempt("dns", lambda: socket.getaddrinfo("example.com", 443))
 attempt("signal_parent", lambda: os.kill(spec["outside_pid"], 0))
-r = subprocess.run(["/usr/bin/osascript", "-e", 'tell application "Finder" to get name'], capture_output=True, text=True)
-out["osascript"] = "ok" if r.returncode == 0 else f"rc={r.returncode} {r.stderr.strip()[:120]}"
-r = subprocess.run(["/usr/bin/open", "-g", "-R", spec["reveal"]], capture_output=True, text=True)
-out["open_finder"] = "ok" if r.returncode == 0 else f"rc={r.returncode} {r.stderr.strip()[:120]}"
+for prog in spec.get("exec", []):
+    # an unknown flag makes each tool print usage and exit, so a program that does start has no side effect
+    attempt(f"exec_{os.path.basename(prog)}", lambda prog=prog: subprocess.run(
+        [prog, "--xv-smoke-invalid-flag"], capture_output=True, stdin=subprocess.DEVNULL, timeout=20))
 try:  # ps is setuid root; the sandbox may refuse to exec it at all
     r = subprocess.run(["/bin/ps", "-p", str(spec["outside_pid"])], capture_output=True, text=True)
     out["ps_outside"] = "ok" if str(spec["outside_pid"]) in r.stdout else "hidden"
@@ -118,6 +118,9 @@ def part1() -> None:
     with tempfile.TemporaryDirectory(prefix="xv-smoke-") as t:
         tmp = Path(t)
         fake_bin = tmp / "home" / agy.relative_to(home) / "bin"
+        progs = [x for x in isolation.EXEC_DENY if os.path.exists(x)]
+        for x in sorted(set(isolation.EXEC_DENY) - set(progs)):
+            print(f"INFO  {x} does not exist on this Mac (blocklist entry has no effect)")
         got = probe("agy", {
             "append": {"write_real_settings": str(agy / "settings.json"),
                        "write_real_agentapi": str(agy / "bin" / "agentapi")},
@@ -126,12 +129,13 @@ def part1() -> None:
                        "create_in_fake_bin": str(fake_bin / "xv-smoke"),
                        "create_in_conversations": str(agy / "conversations" / f"xv-smoke-{os.getpid()}"),
                        "create_in_tmpdir": str(tmp / "x")},
-            "read": secrets, "socket": sockets(), "reveal": str(tmp)}, tmp)
+            "read": secrets, "socket": sockets(), "exec": progs}, tmp)
         if got:
             report(got["home"] == str(tmp / "home"), "agy: HOME is the fake home", got["home"])
             report(got["tmux"] is None, "agy: TMUX unset")
         for name in ("write_real_settings", "write_real_agentapi", "create_outside_home", "create_in_real_bin",
-                     "create_in_real_builtin", *secrets, *sockets(), "signal_parent", "osascript", "open_finder"):
+                     "create_in_real_builtin", *secrets, *sockets(), "signal_parent",
+                     *(f"exec_{os.path.basename(x)}" for x in progs)):
             expect("agy", got, name, False)
         for name in ("create_in_fake_bin", "create_in_conversations", "create_in_tmpdir", "dns"):
             expect("agy", got, name, True)

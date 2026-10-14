@@ -56,10 +56,13 @@ CODEX_STATE_REQUIRED = ("config.toml", "hooks")
 # Only the system copy: a sandbox-exec earlier on PATH could be anything.
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 
-# macOS services that run work outside the sandbox on request (AppleEvents scripting other apps, LaunchServices
-# opening apps or files) or expose the clipboard; the counterpart of hiding D-Bus and X11 on Linux.
-MACH_DENY = ("com.apple.coreservices.appleevents", "com.apple.coreservices.launchservicesd",
-             "com.apple.pasteboard.1")
+# Programs that hand work to something outside the sandbox (LaunchServices, AppleEvents, launchd) or read the
+# screen or clipboard. Seatbelt cannot stop the services themselves: denying their mach-lookup or appleevent-send
+# left `open` and `osascript` working (measured on macOS 26.5, 2026-10-15). Denying the programs is friction against
+# copy-paste payloads only; a program calling the same APIs directly is not stopped.
+EXEC_DENY = ("/usr/bin/open", "/usr/bin/osascript", "/usr/bin/osacompile", "/usr/bin/automator",
+             "/usr/bin/shortcuts", "/bin/launchctl", "/usr/sbin/screencapture", "/usr/bin/pbpaste",
+             "/usr/bin/pbcopy")
 # The one unix socket outside the writable dirs a vendor needs: DNS resolution goes through mDNSResponder.
 UNIX_SOCKET_ALLOW = ("/private/var/run/mDNSResponder",)
 
@@ -394,10 +397,7 @@ def _seatbelt(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_
     sockets = " ".join(f'(remote unix-socket (subpath "{s}"))' for s in UNIX_SOCKET_ALLOW)
     rules += ["(deny network-outbound (remote unix-socket))",
               f"(allow network-outbound {sockets} {refs('U', allow, '(remote unix-socket {})')})",
-              "(deny mach-lookup " + " ".join(f'(global-name "{n}")' for n in MACH_DENY) + ")",
-              # osascript reached Finder with only the mach-lookup deny (measured 2026-10-15): AppleEvents are their
-              # own Seatbelt operation
-              "(deny appleevent-send)",
+              "(deny process-exec " + " ".join(f'(literal "{x}")' for x in EXEC_DENY) + ")",
               # no pid namespace here: at least keep the vendor away from processes outside its sandbox
               "(deny signal)", "(allow signal (target same-sandbox))",
               "(deny process-info*)", "(allow process-info* (target same-sandbox))"]

@@ -251,6 +251,16 @@ uv tool uninstall xvendor
 rm -rf ~/.local/share/xvendor    # job history, if you no longer want it
 ```
 
+## History
+
+xvendor replaced [agent-bridge](https://github.com/mangow314/agent-bridge)
+in my own setup. agent-bridge typed tasks into interactive codex, Claude and
+agy panes and read their screens; xvendor runs the vendors' official headless
+CLIs instead, and makes read-only an enforced property of every job rather
+than a request in the brief. If you want Claude workers, or workers that
+spawn workers of their own, agent-bridge's README compares the alternatives
+(built-in subagents, agent teams, cross-session messaging).
+
 ## Feedback
 
 A personal project I use every day. Bug reports, "this confused me", and

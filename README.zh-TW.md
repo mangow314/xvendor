@@ -148,6 +148,10 @@ uv tool uninstall xvendor
 rm -rf ~/.local/share/xvendor    # job 紀錄，不要了再刪
 ```
 
+## 沿革
+
+xvendor 在我自己的環境裡取代了 [agent-bridge](https://github.com/mangow314/agent-bridge)。agent-bridge 是把任務打進互動式的 codex、Claude、agy pane 再讀它們的畫面；xvendor 改跑各廠的官方 headless CLI，並把唯讀變成每個 job 強制成立的性質，不再只是 brief 裡的一句請求。想要 Claude worker、或讓 worker 再開 worker 的人，agent-bridge 的 README 有替代方案的比較（內建 subagent、agent teams、跨 session 訊息）。
+
 ## 回饋
 
 這是我每天在用的個人專案。bug 回報、「這裡看不懂」、點子都歡迎開 [GitHub Issues](https://github.com/mangow314/xvendor/issues)。最有幫助的資訊：作業系統、廠商 CLI 版本、失敗的指令，以及該 job 的 `stderr.log`。

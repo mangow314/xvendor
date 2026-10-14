@@ -41,3 +41,12 @@ shows the last frame. To check a change, render still frames: copy the SVG,
 drop the `animation-name` declarations, hide the classes whose fade-in comes
 after the chosen second (`.p4 { opacity: 0 }` and so on), and run
 `rsvg-convert still.svg -o still.png`.
+
+## Safety diagram (xv-safety.svg)
+
+A hand-written static SVG (no animation) in the same dark card, colours and
+font as `xv-flow.svg`. Every item in it must match `src/xvendor/isolation.py`
+or the README's Safety section; when either changes, update the picture and
+both READMEs' alt text. To check a change, run `xmllint --noout` on it and
+`rsvg-convert xv-safety.svg -o safety.png`, then look at the PNG: no text
+outside its box, no overlapping lines.

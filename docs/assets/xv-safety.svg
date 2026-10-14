@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="396" viewBox="0 0 900 396" xml:space="preserve" role="img" aria-label="What a vendor sees inside xv on Linux: codex and agy run in one bubblewrap (bwrap) layout with the whole filesystem read-only. Hidden: /run (docker.sock, D-Bus, systemd --user), the X11 and default tmux socket directories, credential files other than its own login, such as ~/.ssh, ~/.aws and .env files, and environment variables named like key, token or secret are not passed in. Writable: the vendor's own state directory with its config entries kept read-only and agy's bin/ replaced by a per-round copy, a per-round TMPDIR deleted afterwards, and with --write DIR only one linked worktree whose .git pointer and gitdir stay read-only. The vendor runs in its own pid namespace, so background processes die with the round; codex also keeps its own -s read-only sandbox.">
+  <!-- hand-written static diagram; every item maps to src/xvendor/isolation.py or the README Safety section -->
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .dim { fill: #8b949e; font-size: 12px; }
+    .txt { fill: #c9d1d9; font-size: 13px; }
+    .head { fill: #e6edf3; font-size: 14px; font-weight: 700; }
+    .box { fill: #161b22; stroke: #30363d; stroke-width: 1.5; }
+    .frame { fill: none; stroke: #f0e442; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .lock { fill: #f0e442; font-size: 13px; }
+    .ok { fill: #3fb950; }
+  </style>
+  <rect width="900" height="396" rx="12" fill="#0d1117"/>
+  <text class="head" x="24" y="32">xv on Linux: codex and agy run in one bubblewrap (bwrap) layout</text>
+
+  <!-- read-only root -->
+  <rect class="frame" x="20" y="50" width="860" height="294" rx="10"/>
+  <text class="lock" x="40" y="76">whole filesystem mounted read-only</text>
+
+  <!-- hidden -->
+  <rect class="box" x="40" y="90" width="400" height="206" rx="8"/>
+  <text class="head" x="56" y="116">hidden or not passed in</text>
+  <text class="txt" x="56" y="142">/run: docker.sock, D-Bus, systemd --user</text>
+  <text class="txt" x="56" y="164">/tmp/.X11-unix, default tmux socket dir</text>
+  <text class="dim" x="56" y="182">  (covered by empty folders)</text>
+  <text class="txt" x="56" y="206">~/.ssh ~/.aws ~/.gnupg ~/.kube ~/.config/gh</text>
+  <text class="txt" x="56" y="228">other login tokens, browser profiles, .env</text>
+  <text class="dim" x="56" y="246">  (blanked; the vendor keeps its own login)</text>
+  <text class="txt" x="56" y="270">env vars named *key* *token* *secret* …</text>
+  <text class="dim" x="56" y="288">  (not passed to the vendor)</text>
+
+  <!-- writable -->
+  <rect class="box" x="460" y="90" width="400" height="206" rx="8"/>
+  <text class="head ok" x="476" y="116">vendor may write</text>
+  <text class="txt" x="476" y="142">its own state dir</text>
+  <text class="dim" x="476" y="160">  config entries bound back read-only</text>
+  <text class="dim" x="476" y="178">  agy bin/ = throwaway copy per round</text>
+  <text class="txt" x="476" y="206">per-round TMPDIR, deleted afterwards</text>
+  <text class="lock" x="476" y="234">--write DIR only: one linked worktree</text>
+  <text class="dim" x="476" y="252">  its .git pointer and gitdir stay</text>
+  <text class="dim" x="476" y="270">  read-only: no add, commit, branch</text>
+  <!-- pid namespace -->
+  <text class="txt" x="40" y="326">own pid namespace (--unshare-pid): background processes die with the round</text>
+
+  <text class="dim" x="24" y="376">codex also keeps its own sandbox: -s read-only (workspace-write with --write)</text>
+</svg>

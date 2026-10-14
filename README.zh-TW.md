@@ -1,10 +1,10 @@
 # xvendor
 
-**在 Claude Code 裡找 codex 或 agy 要一份唯讀的第二意見，在 tmux pane 看它們做事，每份回答都留在 job 目錄。**
+**在 Claude Code 裡找 codex 或 agy 審查、研究，或在一個 worktree 裡改程式：預設唯讀，寫入只開一個目錄，在 tmux pane 看它們做事，每份回答都留在 job 目錄。**
 
-第二個模型的審查常抓到第一個漏掉的東西，但要拿到它很麻煩。你得手動把脈絡貼進另一個 CLI，不然就是讓 Claude 對互動式 codex 打字、再刮螢幕讀結果。而且對方用的是它自己 CLI 的權限，一次「審查」可能順手改了檔案。`xv` 把這件事變成一個指令：用各家官方 headless CLI（`codex exec`、`agy -p`）以唯讀方式執行，即時顯示對方在做什麼，並把需求、事件流和最終回答寫到磁碟，Claude（或你）可以讀，也可以在同一段對話裡追問。
+第二個模型的審查常抓到第一個漏掉的東西，但要拿到它很麻煩。你得手動把脈絡貼進另一個 CLI，不然就是讓 Claude 對互動式 codex 打字、再刮螢幕讀結果。而且對方用的是它自己 CLI 的權限，一次「審查」可能順手改了檔案。`xv` 把這件事變成一個指令：執行各家官方 headless CLI（`codex exec`、`agy -p`），在 Linux 上兩家都跑在同一套 bubblewrap（`bwrap`）沙箱裡。每個 job 預設唯讀，只有廠商自己的狀態目錄和每輪的暫存目錄可寫；`--write DIR` 只在這之外多開一個 linked worktree。`xv` 即時顯示對方在做什麼，並把需求、事件流和最終回答寫到磁碟，Claude（或你）可以讀，也可以在同一段對話裡追問。
 
-![xv 流程：Claude Code 寫好 brief 並執行 xv start codex；xv 以唯讀方式跑 codex，或在唯讀 bubblewrap 掛載裡跑 agy；tmux pane 即時列出每個動作；回答寫進 job 目錄，Claude 讀 response.md](docs/assets/xv-flow.svg)
+![xv 在 Linux 上的流程：Claude Code 寫好 brief 並執行 xv start codex；xv 在 bubblewrap（bwrap）裡跑 codex 或 agy，檔案系統預設唯讀，codex 另加自己的沙箱（-s read-only，寫入模式為 workspace-write），--write DIR 多開一個 worktree 可寫；tmux pane 即時列出每個動作；回答寫進 job 目錄，Claude 讀 response.md](docs/assets/xv-flow.svg)
 
 ![在 tmux 裡執行 xv start codex：shell 旁開出一個 pane，列出 codex 執行的每個指令，最後印出回答與 done | 17s](docs/assets/xv.gif)
 
@@ -15,7 +15,7 @@
 | 部分 | 內容 |
 | --- | --- |
 | `xv` | Python 命令列工具，可單獨在任何 shell 使用 |
-| `xvendor` plugin | Claude Code skill，告訴 Claude 何時、怎麼用 `xv`：寫自足的 brief、平行跑兩家且不讓一家的答案洩漏給另一家、追問、抽查發現 |
+| `xvendor` plugin | Claude Code skill，告訴 Claude 何時、怎麼用 `xv`：寫自足的 brief、平行跑兩家且不讓一家的答案洩漏給另一家、追問、抽查發現、何時用寫入模式（`--write`），以及 round 結束後由主執行緒（Claude 或你）審 diff、清掉 worktree |
 
 > English: [README.md](README.md)
 
@@ -117,6 +117,8 @@ exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
 
 除非你傳 `--write DIR`，每個 job 都是唯讀，由 `xv` 強制，不靠 brief 裡的請求。在 Linux 上，兩家廠商都跑在同一套 bubblewrap（`bwrap`）佈局裡：
 
+![廠商在 xv 裡看得到什麼（Linux）：整個檔案系統唯讀；/run、X11、預設 tmux 目錄的 socket、廠商自己登入以外的憑證檔，以及像機密的環境變數都被藏起來；可寫的只有它自己的狀態目錄、每輪的 TMPDIR，以及 --write 指定的那一個 linked worktree；背景行程隨 round 結束](docs/assets/xv-safety.svg)
+
 - **唯讀根目錄。** 整個檔案系統掛成唯讀。可寫的只有廠商自己的狀態目錄、每輪專用的暫存目錄（跑完即刪，並設為 `TMPDIR`），以及寫入模式下的 `DIR`（必須是 linked worktree；`DIR/.git` 不可為 symlink，主 repo 不可位於 `DIR` 內）。worktree 的整個 git 目錄（含 `DIR/.git`）保持唯讀，所以外廠不能 `git add`（含 gitlink）、`commit`、切分支，不能改 git 設定檔。你自己的 git 設定從 worktree 內執行的程式（`textconv`、`filter`、`core.hooksPath`）不在保護範圍，見「寫入模式」。威脅模型邊界：`xv` 擋的是外廠從 `DIR` 內能做的事；你自己在 `DIR` 外建的、指回 `DIR` 的 symlink，或把廠商 state 目錄和 repo 放進彼此裡面，不在防護範圍。
 - **獨立 pid 命名空間。** bwrap 加 `--unshare-pid`：round 結束時外廠留下的背景行程（含 `setsid` 出去的）一併結束，宿主行程對它不可見（`/proc/<pid>/root` 無從利用）。
 - **`/run` 與 X11 隱藏。** `/run`、`/tmp/.X11-unix` 和預設的 tmux socket 目錄（`$TMUX_TMPDIR` 或 `/tmp` 下的 `tmux-<uid>`）被換成空的記憶體資料夾。唯讀掛載擋不住對路徑型 unix socket 的 `connect()`，而這些目錄裡正是能在沙箱外執行指令的 socket：`docker.sock`（`docker` 群組的使用者等同 root）、系統與使用者 D-Bus、`systemd --user`、X11 display、你的 tmux server。只有當 `/etc/resolv.conf` 是指向 `/run` 的 symlink 時，才把它的目標補回去，讓 DNS 仍可用。
@@ -160,7 +162,7 @@ rm -rf ~/.local/share/xvendor    # job 紀錄，不要了再刪
 
 ## 沿革
 
-xvendor 在我自己的環境裡取代了 [agent-bridge](https://github.com/mangow314/agent-bridge)。agent-bridge 是把任務打進互動式的 codex、Claude、agy pane 再讀它們的畫面；xvendor 改跑各廠的官方 headless CLI，並把唯讀變成每個 job 強制成立的性質，不再只是 brief 裡的一句請求。想要 Claude worker、或讓 worker 再開 worker 的人，agent-bridge 的 README 有替代方案的比較（內建 subagent、agent teams、跨 session 訊息）。
+xvendor 在我自己的環境裡取代了 [agent-bridge](https://github.com/mangow314/agent-bridge)。agent-bridge 是把任務打進互動式的 codex、Claude、agy pane 再讀它們的畫面；xvendor 改跑各廠的官方 headless CLI，並把唯讀變成每個 job 強制成立的預設（只有 `--write` 開放的地方可寫），不再只是 brief 裡的一句請求。想要 Claude worker、或讓 worker 再開 worker 的人，agent-bridge 的 README 有替代方案的比較（內建 subagent、agent teams、跨 session 訊息）。
 
 ## 回饋
 
@@ -175,7 +177,7 @@ uv sync
 uv run pytest
 ```
 
-測試用假的 `codex`、`agy` 腳本（`tests/fakes/`）重播錄好的事件流。需要 tmux 或 bubblewrap 的測試，在它們起不來時（例如在擋掉 unix socket 的沙箱裡）會跳過。GIF 和示意圖的製作方法：[docs/demo/](docs/demo/)。
+測試用假的 `codex`、`agy` 腳本（`tests/fakes/`）重播錄好的事件流。需要 tmux 或 bubblewrap 的測試，在它們起不來時（例如在擋掉 unix socket 的沙箱裡）會跳過。GIF 和兩張示意圖的製作方法：[docs/demo/](docs/demo/)。
 
 相關專案：mango-mods 裡的 [xv-band](https://github.com/mangow314/mango-mods/tree/master/xv-band) 會在 Claude Code 提示框上方列出執行中的 xv job。
 

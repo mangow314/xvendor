@@ -1,19 +1,23 @@
 # xvendor
 
-**Ask codex or agy for a read-only second opinion from inside Claude Code,
-watch them work in a tmux pane, and keep every answer in a job directory.**
+**Have codex or agy review, research, or change code in one worktree from
+inside Claude Code: read-only by default, writes limited to one directory,
+every action live in a tmux pane, every answer kept in a job directory.**
 
 A review from a second model catches things the first one misses, but
 getting one is clumsy. You copy context into another CLI by hand, or let
 Claude drive an interactive codex session by typing into it and scraping the
 screen. And the other model runs with whatever permissions its CLI has, so a
 "review" can quietly edit files. `xv` makes that one command: it runs each
-vendor's official headless CLI (`codex exec`, `agy -p`) read-only, shows
-what it does live, and writes the request, the event stream and the final
-answer to disk, so Claude (or you) can read them and ask follow-ups in the
-same conversation.
+vendor's official headless CLI (`codex exec`, `agy -p`), on Linux both inside
+the same bubblewrap (`bwrap`) sandbox. Every job is read-only by default,
+apart from the vendor's own state and a per-round temp directory;
+`--write DIR` adds one linked worktree to those, nothing more. `xv`
+shows what the vendor does live, and writes the request, the event stream
+and the final answer to disk, so Claude (or you) can read them and ask
+follow-ups in the same conversation.
 
-![xv flow: Claude Code writes a brief and runs xv start codex; xv runs codex read-only, or agy in a read-only bubblewrap mount; a tmux pane shows each action live; the answer lands in a job directory and Claude reads response.md](docs/assets/xv-flow.svg)
+![xv flow on Linux: Claude Code writes a brief and runs xv start codex; xv runs codex or agy inside bubblewrap (bwrap) with the filesystem read-only by default, codex also under its own sandbox (-s read-only, or workspace-write with --write), and --write DIR adds one worktree as writable; a tmux pane shows each action live; the answer lands in a job directory and Claude reads response.md](docs/assets/xv-flow.svg)
 
 ![xv start codex in tmux: a pane opens beside the shell, lists each command codex runs, then prints the answer and done | 17s](docs/assets/xv.gif)
 
@@ -26,7 +30,7 @@ The repo holds two things:
 | Part | What it is |
 | --- | --- |
 | `xv` | A Python command-line tool. Works on its own, from any shell |
-| `xvendor` plugin | A Claude Code skill that tells Claude when and how to use `xv`: writing a self-contained brief, running two vendors in parallel without leaking one's answer to the other, following up, checking findings |
+| `xvendor` plugin | A Claude Code skill that tells Claude when and how to use `xv`: writing a self-contained brief, running two vendors in parallel without leaking one's answer to the other, following up, checking findings, when to use write mode (`--write`), and how the main thread (Claude or you) reviews the diff and removes the worktree once the round ends |
 
 > 繁體中文版：[README.zh-TW.md](README.zh-TW.md)
 
@@ -178,6 +182,8 @@ Every job is read-only unless you pass `--write DIR`, and this is enforced by
 `xv` rather than left to the brief. On Linux both vendors run inside the same
 bubblewrap (`bwrap`) layout:
 
+![What the vendor sees inside xv on Linux: the whole filesystem is read-only; sockets under /run, X11 and the default tmux directory, credential files other than the vendor's own login and secret-looking environment variables are hidden; only its own state directory, a per-round TMPDIR and, with --write, one linked worktree are writable; background processes die with the round](docs/assets/xv-safety.svg)
+
 - **Read-only root.** The whole filesystem is mounted read-only. The only
   writable places are the vendor's own state directory, a per-round temp
   directory (deleted afterwards, exported as `TMPDIR`), and, in write mode,
@@ -299,8 +305,8 @@ rm -rf ~/.local/share/xvendor    # job history, if you no longer want it
 xvendor replaced [agent-bridge](https://github.com/mangow314/agent-bridge)
 in my own setup. agent-bridge typed tasks into interactive codex, Claude and
 agy panes and read their screens; xvendor runs the vendors' official headless
-CLIs instead, and makes read-only an enforced property of every job rather
-than a request in the brief. If you want Claude workers, or workers that
+CLIs instead, and makes read-only the enforced default of every job (writes
+only where `--write` opens them) rather than a request in the brief. If you want Claude workers, or workers that
 spawn workers of their own, agent-bridge's README compares the alternatives
 (built-in subagents, agent teams, cross-session messaging).
 
@@ -324,7 +330,7 @@ uv run pytest
 The tests use fake `codex` and `agy` scripts (`tests/fakes/`) that replay
 recorded event streams. Tests that need tmux or bubblewrap are skipped when
 those cannot start (for example in a sandbox that blocks unix sockets). How the GIF and
-the diagram were made: [docs/demo/](docs/demo/).
+the diagrams were made: [docs/demo/](docs/demo/).
 
 Related: [xv-band](https://github.com/mangow314/mango-mods/tree/master/xv-band)
 in mango-mods shows running xv jobs in a row above the Claude Code prompt.

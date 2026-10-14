@@ -24,7 +24,7 @@
 - Linux。在 Arch Linux 上測試；codex job 在 macOS 上可能可用，但未測試。
 - Python 3.12 以上，安裝用 [uv](https://docs.astral.sh/uv/)。
 - 至少一個廠商 CLI，已安裝並登入：[codex](https://github.com/openai/codex)（`codex exec`）或 agy（Google 的 Antigravity CLI，`agy -p`）。
-- 跑 agy：需要 [bubblewrap](https://github.com/containers/bubblewrap)（`bwrap`），且 agy 要先互動執行過一次，讓它的狀態目錄存在。沒有 `bwrap` 時 `xv start agy` 會拒絕執行；缺狀態目錄時，這一輪會失敗（tmux pane 會顯示缺什麼）。
+- Linux 上兩家廠商都需要 [bubblewrap](https://github.com/containers/bubblewrap)（`bwrap`）。沒有時 `xv start` 會拒絕執行。每家廠商也要先互動執行過一次，讓它的狀態目錄存在；否則這一輪會失敗（tmux pane 會顯示缺什麼）。
 - 選用：tmux。在 tmux 裡每個 job 有即時 pane；不在 tmux 裡就背景執行，用 `xv show` 讀結果。
 - 用 plugin 需要 Claude Code。
 
@@ -63,23 +63,75 @@ xv stop <job>                      # 中途砍掉這一輪；session 保留
 xv list                            # 所有 job 的廠商、輪次、狀態、秒數
 xv close <job>                     # 關掉 job 的 pane
 xv watch <job>                     # 在任何終端機跟看執行中的這一輪
+
+# codex profile（檔案放在 ~/.codex 或 $CODEX_HOME）
+xv start codex --profile xv-review --file brief.md                 # review：關閉 web search
+xv start codex --profile xv-survey --cwd /path/to/clean/dir -m "…" # survey：cached web search
+
+# 寫入模式：廠商只能寫一個目錄
+xv start codex --write /path/to/worktree --file brief.md
 ```
+
+**Profile。** `--profile NAME`（僅 codex）會在你的 codex 基底設定之上，載入 `$CODEX_HOME`（預設 `~/.codex`）裡的 `NAME.config.toml`。有兩個是給 `xv` 用的；本 repo 不附檔，請自己建立：
+
+`xv-review.config.toml`，審查用：不開 web search，GitHub connector 關閉。
+
+```toml
+web_search = "disabled"
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
+```
+
+`xv-survey.config.toml`，查資料用：cached web search。讀到的網頁可能夾帶注入指令，所以 `--cwd` 請給不含機密的目錄。
+
+```toml
+web_search = "cached"
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
+```
+
+**寫入模式。** `--write DIR` 讓廠商只能寫 `DIR`（`--cwd` 預設為 `DIR`），其餘仍是唯讀。請用 git worktree。廠商能執行 `git status`、`git diff`，不能 `git add`、`git commit`。round 進行中你自己不要碰 `DIR`。`xv wait` 回來後，用 `git -C DIR diff` 審，再自己 commit、merge。同一個 `DIR` 同時只能有一個寫入 job；第二次 `xv start` 會被拒絕。`ask` 沿用 `start` 設的寫入目錄。
 
 `<job>` 可以給完整 id 或末 4 碼。每一輪有逾時（`start` 的 `--timeout`，預設 1200 秒；`ask` 沿用 job 的逾時，除非另外指定）。job 存在 `~/.local/share/xvendor/jobs/<job-id>/`（設 `XV_DATA` 可改位置，須是只含英數字、`/`、`.`、`_`、`-` 的絕對路徑），每一輪一個資料夾，內有 `request.md`、`events.jsonl`、`response.md`、`stderr.log`。
 
 ## 安全
 
-每個 job 都是唯讀，由 `xv` 強制，不靠 brief 裡的請求：
+除非你傳 `--write DIR`，每個 job 都是唯讀，由 `xv` 強制，不靠 brief 裡的請求。在 Linux 上，兩家廠商都跑在同一套 bubblewrap（`bwrap`）佈局裡：
 
-- **codex** 用 `-s read-only` 執行，這是 codex 自己的沙箱。追問輪會再傳一次 `-c sandbox_mode="read-only"`，因為 resume 的 codex session 不會沿用第一輪的旗標。
-- **agy** 跑在 bubblewrap 裡，整個檔案系統掛成唯讀。主機上只有 agy 自己的狀態目錄（`~/.gemini/antigravity-cli`，其中的設定、啟動腳本與內建 skill 仍是唯讀）可寫；另外 agy 有一個每輪專用、跑完即刪的暫存目錄。`/run/user/<uid>` 和預設的 tmux socket 目錄（`$TMUX_TMPDIR` 或 `/tmp` 下的 `tmux-<uid>`）被換成空的記憶體資料夾，agy 沒辦法透過 `systemd --user` 或你預設的 tmux server 在沙箱外執行指令。家目錄的憑證檔（`~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.config/gh`、`~/.kube`、`~/.git-credentials`、`~/.npmrc`、`~/.pgpass`、`~/.netrc`、`~/.claude/.credentials.json`、`~/.codex/auth.json`）被蓋成空的。agy 自己的 `--sandbox` 擋不住它的寫檔工具，所以 xv 不靠它。agy 不會在沒有這些保護的狀態下執行：沒有 `bwrap` 時 `xv start agy` 直接拒絕，agy 的狀態目錄不完整時這一輪會失敗。
+- **唯讀根目錄。** 整個檔案系統掛成唯讀。可寫的只有廠商自己的狀態目錄、每輪專用的暫存目錄（跑完即刪，並設為 `TMPDIR`），以及寫入模式下的 `DIR`（若 `DIR` 是 linked worktree，還包括其 `.git` 檔所指的 gitdir）。
+- **`/run` 與 X11 隱藏。** `/run`、`/tmp/.X11-unix` 和預設的 tmux socket 目錄（`$TMUX_TMPDIR` 或 `/tmp` 下的 `tmux-<uid>`）被換成空的記憶體資料夾。唯讀掛載擋不住對路徑型 unix socket 的 `connect()`，而這些目錄裡正是能在沙箱外執行指令的 socket：`docker.sock`（`docker` 群組的使用者等同 root）、系統與使用者 D-Bus、`systemd --user`、X11 display、你的 tmux server。只有當 `/etc/resolv.conf` 是指向 `/run` 的 symlink 時，才把它的目標補回去，讓 DNS 仍可用。
+- **憑證蓋掉**（目錄換成空資料夾，檔案換成空檔）。家目錄下：`~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.config/gh`、`~/.kube`、`~/.git-credentials`、`~/.npmrc`、`~/.pgpass`、`~/.netrc`、`~/.claude/.credentials.json`、`~/.codex/auth.json`、`~/.gemini/antigravity-cli/antigravity-oauth-token`、`~/.gemini/antigravity-cli/conversations`、`~/.gemini/oauth_creds.json`、`~/.gemini/google_accounts.json`、`~/.mozilla`、`~/.config/google-chrome`、`~/.config/chromium`、`~/.config/BraveSoftware`、`~/.config/Bitwarden CLI`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.password-store`、`~/.claude.json`、`~/.claude/projects`、`~/.codex/sessions`、`~/.codex/history.jsonl`，以及各專案的 `.env`：`~/projects/*/.env`、`~/projects/*/.env.*`、`~/projects/*/*/.env`、`~/projects/*/.envrc`。（以 `src/xvendor/isolation.py` 的 `SECRET_PATHS`、`SECRET_GLOBS` 為準。）位於該廠商自己狀態目錄內的項目對該廠商不蓋，所以它保有自己的登入。
+- **狀態目錄可寫，設定鎖唯讀。** 廠商必須能寫自己的狀態，所以該目錄可寫，但之後無沙箱的執行會載入的項目維持唯讀：
+  - agy，`~/.gemini/antigravity-cli`：`settings.json`、`bin`、`builtin`。
+  - codex，`$CODEX_HOME`（預設 `~/.codex`）：`config.toml`、`AGENTS.md`、`hooks`、`rules`、`skills`、`plugins`、`agents`，以及每個 `*.config.toml` profile 檔。`config.toml` 與 `hooks` 必須存在，否則這一輪會被拒絕，而不是在無保護下執行。
+- **環境變數清洗。** 名稱符合 `key`、`token`、`secret`、`passw`、`cred`、`auth`（不分大小寫）的變數不會傳給廠商，`GIT_CONFIG_*` 整個家族也不傳。這些一律保留：`XV_DATA`、`XV_PANE`、`CODEX_HOME`、`PATH`、`HOME`、`TMPDIR`、`TERM`、`LANG`、`TMUX`、`TMUX_PANE` 與 `LC_*`。bwrap 內 `TMUX`、`TMUX_PANE` 會被 unset。廠商靠檔案登入，不靠環境變數。
+- **codex 自己的沙箱**（`-s read-only`，寫入模式為 `workspace-write`）保留作為第二層。追問輪會再傳一次 `-c sandbox_mode="read-only"`，因為 resume 的 codex session 不會沿用第一輪的旗標。
+- **agy 自己的 `--sandbox`** 擋不住它的寫檔工具，所以 `xv` 不靠它。
+- **寧可拒絕，不降級。** 沒有 `bwrap` 或不是 Linux 時，`xv start agy` 直接拒絕。Linux 上 codex 也需要 `bwrap`。**macOS 上 codex 不經 `xv` 隔離**：只有 codex 自己的沙箱，`xv` 會印出一行說明。
 
 沒有涵蓋的部分：
 
 - 不擋網路。廠商讀得到的東西都可能隨對話送出去，所以請把每個可讀的檔案都當成已分享給那家廠商。
-- codex 的唯讀靠 codex 自己的沙箱；`xv` 只保證每次都帶上這個旗標。
-- 用自訂 socket 的 tmux server（`tmux -S <路徑>`，不在預設目錄）不會對 agy 隱藏。
-- agy 讀得到上面清單以外的所有檔案，包括 `~/.local/share/xvendor/` 裡的其他 job。skill 會要 Claude 請兩家都別讀那個資料夾，但那只是請求，擋不住。
+- 記憶污染（memory poisoning）。廠商的狀態目錄可寫，其中包括記憶（agy 的 `brain/`、codex 的 `memories/`）。透過檔案或網頁注入的指令可能被存進去，進而影響你下一次無沙箱的互動式 codex 或 agy。`xv` 擋不住。
+- 用自訂 socket 的 tmux server（`tmux -S <路徑>`，不在預設目錄）不會對廠商隱藏。
+- 廠商讀得到上面清單以外的所有檔案，包括 `~/.local/share/xvendor/` 裡的其他 job。skill 會要 Claude 請兩家都別讀那個資料夾，但那只是請求，擋不住。
+- 寫入模式在 `DIR` 內信任廠商：commit 前請先看 `git diff`，也不要把機密放進 `DIR`。
+
+## 新增廠商
+
+1. 實作 `src/xvendor/vendors/base.py` 的 `Vendor` Protocol，三個方法：`build(round, session, prompt, profile, mode)` 回傳指令列（`mode` 是 `"read"` 或 `"write"`，依它選廠商的沙箱旗標）、`parse(line)` 把事件流的一行轉成 `Event` 或 `None`、`result(lines)` 回傳 `(session, response, ok)`。
+2. 在 `src/xvendor/cli.py` 的 `vendor_for` 註冊（`xv start` 的 `choices` 也要加）。
+3. 在 `src/xvendor/isolation.py` 宣告它的狀態目錄，以及其中哪些項目維持唯讀。沒宣告的話，`check()` 會拒絕執行該廠商。
 
 ## 費用與隱私
 

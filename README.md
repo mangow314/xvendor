@@ -38,10 +38,10 @@ The repo holds two things:
 - At least one vendor CLI, installed and logged in:
   [codex](https://github.com/openai/codex) (`codex exec`) or agy (Google's
   Antigravity CLI, `agy -p`).
-- For agy: [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`),
-  and agy run once interactively so its state directory exists. Without
-  `bwrap`, `xv start agy` refuses to run; without the state directory, the
-  round fails (the tmux pane shows what is missing).
+- [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) on Linux,
+  for both vendors. Without it, `xv start` refuses to run. Each vendor must
+  also have been run once interactively so its state directory exists;
+  otherwise the round fails (the tmux pane shows what is missing).
 - Optional: tmux. Inside tmux each job gets a live pane; outside tmux it runs
   in the background and you read the result with `xv show`.
 - For the plugin: Claude Code.
@@ -85,7 +85,53 @@ xv stop <job>                      # cut a round short; the session is kept
 xv list                            # all jobs with vendor, round, status, seconds
 xv close <job>                     # close the job's pane
 xv watch <job>                     # follow a running round from any terminal
+
+# codex profiles (files in ~/.codex, or $CODEX_HOME)
+xv start codex --profile xv-review --file brief.md                 # review: web search off
+xv start codex --profile xv-survey --cwd /path/to/clean/dir -m "…" # survey: cached web search
+
+# write mode: the vendor may write inside one directory only
+xv start codex --write /path/to/worktree --file brief.md
 ```
+
+**Profiles.** `--profile NAME` (codex only) loads `NAME.config.toml` from
+`$CODEX_HOME` (default `~/.codex`) on top of your base codex config. Two are
+meant for `xv`; they are not shipped in this repo, so create them yourself:
+
+`xv-review.config.toml`, for reviews: no web search, GitHub connector off.
+
+```toml
+web_search = "disabled"
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
+```
+
+`xv-survey.config.toml`, for research: cached web search. The pages it reads
+can carry injected instructions, so give it a `--cwd` with nothing secret in it.
+
+```toml
+web_search = "cached"
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
+```
+
+**Write mode.** `--write DIR` lets the vendor write inside `DIR` only
+(`--cwd` defaults to `DIR`); everything else stays read-only. Use a git
+worktree. The vendor can run `git status` and `git diff`, but not `git add`
+or `git commit`. Do not touch `DIR` yourself while a round is running. When
+`xv wait` returns, review with `git -C DIR diff`, then commit and merge
+yourself. Only one job at a time may write a given `DIR`; a second
+`xv start` is refused. `ask` keeps the write directory set by `start`.
 
 `<job>` can be the full id or its last 4 characters. Each round has a
 timeout (`--timeout` on `start`, default 1200 seconds; `ask` keeps the
@@ -97,38 +143,91 @@ folder per round with `request.md`, `events.jsonl`, `response.md` and
 
 ## Safety
 
-Every job is read-only, enforced by `xv` rather than left to the brief:
+Every job is read-only unless you pass `--write DIR`, and this is enforced by
+`xv` rather than left to the brief. On Linux both vendors run inside the same
+bubblewrap (`bwrap`) layout:
 
-- **codex** runs with `-s read-only`, codex's own sandbox. Follow-up rounds
-  pass `-c sandbox_mode="read-only"` again, because a resumed codex session
-  does not keep the first round's flag.
-- **agy** runs inside bubblewrap with the whole filesystem mounted
-  read-only. On the host, only agy's own state directory
-  (`~/.gemini/antigravity-cli`, minus its settings, launcher and built-in
-  skills, which stay read-only) is writable; agy also gets a per-round temp
-  directory, deleted afterwards. `/run/user/<uid>` and the default tmux
+- **Read-only root.** The whole filesystem is mounted read-only. The only
+  writable places are the vendor's own state directory, a per-round temp
+  directory (deleted afterwards, exported as `TMPDIR`), and, in write mode,
+  `DIR` (plus the gitdir its `.git` file points to, when `DIR` is a linked
+  worktree).
+- **`/run` and X11 hidden.** `/run`, `/tmp/.X11-unix` and the default tmux
   socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
-  empty in-memory folders, so agy cannot reach `systemd --user` or your
-  default tmux server to run a command outside the sandbox. Credential files in
-  your home directory (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`,
-  `~/.kube`, `~/.git-credentials`, `~/.npmrc`, `~/.pgpass`, `~/.netrc`,
-  `~/.claude/.credentials.json`, `~/.codex/auth.json`) are blanked out.
-  agy's own `--sandbox` flag does not stop its file-writing tools, so xv does
-  not rely on it. agy never runs without this: `xv start agy` refuses when
-  `bwrap` is missing, and the round fails if agy's state directory is
-  incomplete.
+  empty in-memory folders. A read-only mount does not stop `connect()` to a
+  path-based unix socket, and those directories hold the sockets that run
+  commands outside the sandbox: `docker.sock` (anyone in the `docker` group
+  is effectively root), the system and user D-Bus, `systemd --user`, the X11
+  display, your tmux server. Only `/etc/resolv.conf`'s target is put back
+  when it is a symlink into `/run`, so DNS still works.
+- **Credentials blanked out** (directories become empty folders, files become
+  empty files) under your home directory: `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gh`, `~/.kube`, `~/.git-credentials`, `~/.npmrc`, `~/.pgpass`,
+  `~/.netrc`, `~/.claude/.credentials.json`, `~/.codex/auth.json`,
+  `~/.gemini/antigravity-cli/antigravity-oauth-token`,
+  `~/.gemini/antigravity-cli/conversations`, `~/.gemini/oauth_creds.json`,
+  `~/.gemini/google_accounts.json`, `~/.mozilla`, `~/.config/google-chrome`,
+  `~/.config/chromium`, `~/.config/BraveSoftware`, `~/.config/Bitwarden CLI`,
+  `~/.config/gcloud`, `~/.docker/config.json`, `~/.password-store`,
+  `~/.claude.json`, `~/.claude/projects`, `~/.codex/sessions`,
+  `~/.codex/history.jsonl`, plus per-project `.env` files:
+  `~/projects/*/.env`, `~/projects/*/.env.*`, `~/projects/*/*/.env` and
+  `~/projects/*/.envrc`. (The source of truth is `SECRET_PATHS` and
+  `SECRET_GLOBS` in `src/xvendor/isolation.py`.) Entries inside the vendor's
+  own state directory are skipped for that vendor, so it keeps its own login.
+- **State directory writable, config locked.** The vendor must be able to
+  write its own state, so that directory is writable, but the entries a later
+  unsandboxed run would load stay read-only:
+  - agy, `~/.gemini/antigravity-cli`: `settings.json`, `bin`, `builtin`.
+  - codex, `$CODEX_HOME` (default `~/.codex`): `config.toml`, `AGENTS.md`,
+    `hooks`, `rules`, `skills`, `plugins`, `agents`, and every
+    `*.config.toml` profile file. `config.toml` and `hooks` must exist,
+    otherwise the round is refused rather than run unprotected.
+- **Environment scrubbed.** Variables whose name matches `key`, `token`,
+  `secret`, `passw`, `cred` or `auth` (case-insensitive) are not passed to the
+  vendor, and neither is the `GIT_CONFIG_*` family. These are kept regardless:
+  `XV_DATA`, `XV_PANE`, `CODEX_HOME`, `PATH`, `HOME`, `TMPDIR`, `TERM`,
+  `LANG`, `TMUX`, `TMUX_PANE` and `LC_*`. Inside bwrap `TMUX` and `TMUX_PANE`
+  are unset. Vendors log in through files, not environment variables.
+- **codex's own sandbox** (`-s read-only`, or `workspace-write` in write mode)
+  stays on as a second layer. Follow-up rounds pass
+  `-c sandbox_mode="read-only"` again, because a resumed codex session does
+  not keep the first round's flag.
+- **agy's own `--sandbox`** does not stop its file-writing tools, so `xv`
+  does not rely on it.
+- **Refuse, never degrade.** `xv start agy` refuses when `bwrap` is missing
+  or the platform is not Linux. On Linux codex also needs `bwrap`.
+  **On macOS codex runs without `xv` isolation**: only codex's own sandbox
+  applies, and `xv` prints a note to say so.
 
 What this does not cover:
 
 - Network access is not blocked. Anything a vendor can read can leave with
   its conversation, so treat every readable file as shared with that vendor.
-- codex's read-only mode is codex's own sandbox; `xv` only makes sure the
-  flag is always passed.
+- Memory poisoning. The vendor's state directory is writable, and that
+  includes its memory (agy `brain/`, codex `memories/`). A prompt injected
+  through a file or web page can be saved there and steer your next
+  interactive, unsandboxed codex or agy session. `xv` does not stop this.
 - A tmux server on a custom socket (`tmux -S <path>` outside the default
-  directory) is not hidden from agy.
-- agy can read every file that is not on the list above, including other
-  jobs in `~/.local/share/xvendor/`. The skill tells Claude to ask each
+  directory) is not hidden from the vendor.
+- The vendor can read every file that is not on the list above, including
+  other jobs in `~/.local/share/xvendor/`. The skill tells Claude to ask each
   vendor not to read that folder, but that is a request, not a wall.
+- Write mode trusts the vendor inside `DIR`: review `git diff` before you
+  commit, and do not put secrets in `DIR`.
+
+## Adding a vendor
+
+1. Implement the `Vendor` Protocol from `src/xvendor/vendors/base.py`, three
+   methods: `build(round, session, prompt, profile, mode)` returns the
+   command line (`mode` is `"read"` or `"write"`; pick the vendor's sandbox
+   flag from it), `parse(line)` turns one event-stream line into an `Event`
+   or `None`, and `result(lines)` returns `(session, response, ok)`.
+2. Register it in `vendor_for` in `src/xvendor/cli.py` (and the `choices` of
+   `xv start`).
+3. Declare its isolation in `src/xvendor/isolation.py`: the state directory
+   and which entries inside it stay read-only. Without that, `check()` refuses
+   to run the vendor.
 
 ## Cost and privacy
 

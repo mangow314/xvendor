@@ -154,7 +154,43 @@ def test_list_format(xv):
     xv("wait", a)
     proc = xv("list")
     assert proc.returncode == 0
-    assert re.fullmatch(rf"{a}  codex  r1  done  \d+\n", proc.stdout)
+    assert re.fullmatch(rf"{a}  codex  r1  done  \d+  -\n", proc.stdout)
+
+
+def test_start_write_sets_meta(xv, data, tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", work)
+    assert proc.returncode == 0, proc.stderr
+    meta = json.loads((data / "jobs" / proc.stdout.strip() / "meta.json").read_text())
+    assert (meta["mode"], meta["writable"], meta["cwd"]) == ("write", str(work.resolve()), str(work.resolve()))
+    xv("wait", proc.stdout.strip())
+    assert f"write:{work.resolve()}" in xv("list").stdout
+
+
+def test_start_write_refuses_second_writer(xv, tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    first = xv("start", "codex", "-m", "q", "--no-pane", "--write", work, XV_FAKE_DELAY=30)
+    assert first.returncode == 0, first.stderr
+    second = xv("start", "codex", "-m", "q", "--no-pane", "--write", work)
+    assert second.returncode == 2
+    assert f"another job is still writing {work.resolve()}: {first.stdout.strip()}" in second.stderr
+    xv("stop", first.stdout.strip())
+
+
+def test_ask_rejects_write(xv, tmp_path):
+    job = start(xv)
+    xv("wait", job)
+    proc = xv("ask", job, "-m", "again", "--write", tmp_path)
+    assert proc.returncode == 2
+    assert "ask only takes" in proc.stderr
+
+
+def test_start_write_missing_dir(xv, tmp_path):
+    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", tmp_path / "nope")
+    assert proc.returncode == 2
+    assert f"xv: --write does not exist: {tmp_path / 'nope'}" in proc.stderr
 
 
 def test_list_empty(xv):

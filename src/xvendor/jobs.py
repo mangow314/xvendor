@@ -37,7 +37,7 @@ class JobStore:
         os.replace(tmp, d / "meta.json")
 
     def create(self, vendor: str, cwd: str, timeout: int, no_pane: bool,
-               profile: str | None, request: str) -> str:
+               profile: str | None, request: str, writable: str | None = None) -> str:
         if not self.jobs.exists():
             self.jobs.mkdir(parents=True)
             os.chmod(self.jobs, 0o700)
@@ -48,6 +48,7 @@ class JobStore:
         (d / "round-1" / "request.md").write_text(request + "\n", encoding="utf-8")
         self._write_meta(d, {
             "vendor": vendor, "cwd": cwd, "timeout": timeout, "no_pane": no_pane, "profile": profile,
+            "mode": "write" if writable else "read", "writable": writable,
             "session": None, "pane": None, "round": 1, "status": "running", "rc": None, "secs": None,
             "round_started": int(time.time()), "stop_requested": False, "run_pid": None,
             "created": f"{now:%Y-%m-%dT%H:%M:%SZ}",
@@ -84,6 +85,13 @@ class JobStore:
         ids = sorted(p.name for p in self.jobs.iterdir()
                      if JOB_ID_RE.fullmatch(p.name) and (p / "meta.json").is_file())
         return [(job, self.meta(job)) for job in ids]
+
+    def running_writable(self, path: str) -> str | None:
+        """The running job that holds path as its --write dir, or None."""
+        for job, m in self.list():
+            if m["status"] == "running" and m.get("writable") == path:
+                return job
+        return None
 
     def resolve(self, ref: str) -> str:
         if JOB_ID_RE.fullmatch(ref):

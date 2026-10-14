@@ -339,3 +339,44 @@ def test_real_bwrap_agy_keeps_own_token(tmp_path_factory, monkeypatch):
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines() == ["AGYTOKEN", "['c1']"]
+
+
+# --write
+
+def test_write_argv_binds_dir(tmp_path, monkeypatch):
+    home, state = fake_codex_home(tmp_path, monkeypatch)
+    work = tmp_path / "work"
+    work.mkdir()
+    argv = wrap("codex", ["codex", "exec", "hi"], tmp_path / "t", work)
+    seq = ["--bind", str(work), str(work)]
+    at = [i for i in range(len(argv)) if argv[i:i + 3] == seq]
+    assert len(at) == 1
+    assert at[0] > argv.index(str(state))
+    assert at[0] < argv.index(str(tmp_path / "t"))
+    assert wrap("codex", ["codex"], tmp_path / "t").count("--bind") == 2  # state + tmp only
+
+
+def test_write_argv_binds_worktree_gitdir(tmp_path, monkeypatch):
+    fake_codex_home(tmp_path, monkeypatch)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    gitdir = tmp_path / "main" / ".git" / "worktrees" / "wt"
+    gitdir.mkdir(parents=True)
+    (wt / ".git").write_text("gitdir: ../main/.git/worktrees/wt\n")
+    argv = wrap("codex", ["codex"], tmp_path / "t", wt)
+    assert any(argv[i:i + 3] == ["--bind", str(gitdir), str(gitdir)] for i in range(len(argv)))
+    assert not any(a == str(tmp_path / "main" / ".git" / "objects") for a in argv)
+
+
+@needs_bwrap
+def test_real_bwrap_write_dir_only(tmp_path_factory):
+    work = tmp_path_factory.mktemp("work")
+    outside = tmp_path_factory.mktemp("outside")
+    tmp = tmp_path_factory.mktemp("agytmp")
+    proc = subprocess.run(wrap("agy", probe(work / "xv-probe"), tmp, work), capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert (work / "xv-probe").read_text() == "x"
+    proc = subprocess.run(wrap("agy", probe(outside / "xv-probe"), tmp, work), capture_output=True, text=True,
+                          timeout=30)
+    assert proc.returncode != 0
+    assert not (outside / "xv-probe").exists()

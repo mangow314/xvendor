@@ -44,6 +44,15 @@ def test_build_resume_profile(v):
         "--json", "sid-1", "again"]
 
 
+def test_build_write_mode(v):
+    assert v.build(1, None, "hi", None, mode="write") == [
+        "codex", "exec", "-s", "workspace-write", "--skip-git-repo-check", "--json", "hi"]
+    assert v.build(2, "sid-1", "again", None, mode="write") == [
+        "codex", "exec", "resume", "-c", 'sandbox_mode="workspace-write"', "--skip-git-repo-check", "--json",
+        "sid-1", "again"]
+    assert v.build(1, None, "hi", None, mode="read") == v.build(1, None, "hi", None)
+
+
 # parse
 
 def line(obj):

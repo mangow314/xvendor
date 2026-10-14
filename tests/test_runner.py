@@ -29,7 +29,7 @@ def codex_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     if sys.platform != "linux" or shutil.which("bwrap") is None:
-        monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir: list(argv))
+        monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def test_codex_done(store, tmp_path, env, fixture_path):
 
 def test_argv_reaches_cli(store, tmp_path, env, fixture_path, monkeypatch):
     # the fake writes argv.json outside the sandbox's writable dirs, so check argv without bwrap
-    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir: list(argv))
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
     job = new_job(store, tmp_path)
     out = tmp_path / "argv.json"
     runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"), XV_FAKE_ARGV_OUT=out))

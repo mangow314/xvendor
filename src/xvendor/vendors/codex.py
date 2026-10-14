@@ -27,13 +27,15 @@ def _unwrap(command: str) -> str:
 class CodexVendor:
     name = "codex"
 
-    def build(self, round: int, session: str | None, prompt: str, profile: str | None) -> list[str]:
+    def build(self, round: int, session: str | None, prompt: str, profile: str | None,
+              mode: str = "read") -> list[str]:
+        sandbox = "workspace-write" if mode == "write" else "read-only"
         # -p must precede exec: `codex exec resume -p` is rejected (2026-10-10)
         pf = ["-p", profile] if profile else []
         if round == 1:
-            return ["codex", *pf, "exec", "-s", "read-only", "--skip-git-repo-check", "--json", prompt]
+            return ["codex", *pf, "exec", "-s", sandbox, "--skip-git-repo-check", "--json", prompt]
         # resume does not inherit round 1's -s read-only (2026-10-10), so pass it every round
-        return ["codex", *pf, "exec", "resume", "-c", 'sandbox_mode="read-only"', "--skip-git-repo-check",
+        return ["codex", *pf, "exec", "resume", "-c", f'sandbox_mode="{sandbox}"', "--skip-git-repo-check",
                 "--json", session, prompt]
 
     def parse(self, line: str) -> Event | None:

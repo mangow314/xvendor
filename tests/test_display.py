@@ -24,6 +24,13 @@ def test_header(d, out):
     assert "codex | 07b0 | round 2 | limit 21 min" in out.getvalue()
 
 
+def test_header_write(d, out):
+    d.header("codex", JOB, 1, 600, "write", "/work/dir")
+    assert "| write /work/dir" in out.getvalue()
+    d.header("codex", JOB, 1, 600)
+    assert out.getvalue().count("write") == 1
+
+
 @pytest.mark.parametrize("kind, prefix", [("action", "  run    "), ("note", "  note   "), ("error", "  error  ")])
 def test_event_prefix(d, out, kind, prefix):
     d.event(Event(kind, "hello"))

@@ -51,7 +51,9 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
     timed_out = threading.Event()
     t0 = time.monotonic()
     try:
-        argv = wrap(vendor.name, vendor.build(n, meta["session"], prompt, meta["profile"]), tmpdir)
+        writable = Path(meta["writable"]) if meta.get("writable") else None
+        built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
+        argv = wrap(vendor.name, built, tmpdir, writable)
         lines: list[str] = []
         with open(rd / "stderr.log", "wb") as err, open(rd / "events.jsonl", "wb") as out:
             proc = subprocess.Popen(argv, cwd=meta["cwd"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

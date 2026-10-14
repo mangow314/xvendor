@@ -53,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("vendor", choices=["codex", "agy"])
     add_request(p)
     p.add_argument("--cwd")
+    p.add_argument("--write", metavar="DIR", help="let the vendor write inside DIR only (default cwd = DIR)")
     p.add_argument("--timeout", type=nonneg_int, default=DEFAULT_TIMEOUT)
     p.add_argument("--profile")
     p.add_argument("--no-pane", action="store_true")
@@ -63,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=nonneg_int)
     # accepted only to reject them with a clear message (R8)
     p.add_argument("--cwd", help=argparse.SUPPRESS)
+    p.add_argument("--write", help=argparse.SUPPRESS)
     p.add_argument("--profile", help=argparse.SUPPRESS)
     p.add_argument("--no-pane", action="store_true", help=argparse.SUPPRESS)
 
@@ -102,7 +104,12 @@ def read_request(args) -> str:
 
 def cmd_start(store: JobStore, args) -> int:
     req = read_request(args)
-    cwd = Path(args.cwd or os.getcwd())
+    writable = None
+    if args.write is not None:
+        if not Path(args.write).is_dir():
+            raise Fail(f"--write does not exist: {args.write}")
+        writable = Path(args.write).resolve()
+    cwd = Path(args.cwd or writable or os.getcwd())
     if not cwd.is_dir():
         raise Fail(f"--cwd does not exist: {args.cwd}")
     try:
@@ -117,7 +124,10 @@ def cmd_start(store: JobStore, args) -> int:
         codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         if not (codex_home / f"{args.profile}.config.toml").is_file():
             raise Fail(f"codex profile not found: {codex_home / (args.profile + '.config.toml')}")
-    job = store.create(args.vendor, str(cwd.resolve()), args.timeout, args.no_pane, args.profile, req)
+    if writable is not None and (busy := store.running_writable(str(writable))):
+        raise Fail(f"another job is still writing {writable}: {busy}")
+    job = store.create(args.vendor, str(cwd.resolve()), args.timeout, args.no_pane, args.profile, req,
+                       str(writable) if writable else None)
     panes.launch(store, job, 1)
     print(job)
     return 0
@@ -125,8 +135,8 @@ def cmd_start(store: JobStore, args) -> int:
 
 def cmd_ask(store: JobStore, args) -> int:
     job = store.resolve(args.job)
-    if args.profile is not None or args.cwd is not None or args.no_pane:
-        raise Fail("ask only takes --file, -m and --timeout; profile, cwd and pane stay as set by start")
+    if args.profile is not None or args.cwd is not None or args.write is not None or args.no_pane:
+        raise Fail("ask only takes --file, -m and --timeout; profile, cwd, write dir and pane stay as set by start")
     req = read_request(args)
     meta = store.meta(job)
     if meta["status"] == "running":
@@ -167,7 +177,8 @@ def cmd_show(store: JobStore, args) -> int:
 
 
 def cmd_list(store: JobStore, args) -> int:
-    rows = [[job, m["vendor"], f"r{m['round']}", m["status"], "-" if m["secs"] is None else str(m["secs"])]
+    rows = [[job, m["vendor"], f"r{m['round']}", m["status"], "-" if m["secs"] is None else str(m["secs"]),
+             f"write:{m['writable']}" if m.get("mode", "read") == "write" else "-"]
             for job, m in store.list()]
     if rows:
         widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
@@ -224,7 +235,7 @@ def cmd_run(store: JobStore, args) -> int:
         sys.stdout.flush()
         carry.unlink()
     display = Display()
-    display.header(meta["vendor"], job, n, meta["timeout"])
+    display.header(meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"))
     rc = 0
     try:
         runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event,
@@ -247,7 +258,7 @@ def cmd_watch(store: JobStore, args) -> int:
     n = meta["round"]
     vendor = vendor_for(meta["vendor"])
     display = Display()
-    display.header(meta["vendor"], job, n, meta["timeout"])
+    display.header(meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"))
     events = store.round_dir(job, n) / "events.jsonl"
     f = None
     buf = ""

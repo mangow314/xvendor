@@ -185,6 +185,17 @@ def test_list_format(xv):
     assert re.fullmatch(rf"{a}  codex  r1  done  \d+  -\n", proc.stdout)
 
 
+def test_list_hides_old_finished_jobs(xv, data):
+    old, new = start(xv), start(xv)
+    xv("wait", old)
+    xv("wait", new)
+    week_ago = time.time() - 7 * 86400
+    os.utime(data / "jobs" / old / "meta.json", (week_ago, week_ago))
+    listed = xv("list").stdout
+    assert new in listed and old not in listed
+    assert old in xv("list", "--all").stdout
+
+
 def test_start_write_sets_meta(xv, data, tmp_path):
     work = make_worktree(tmp_path)
     proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", work)
@@ -329,7 +340,7 @@ def test_watch_finished_round(xv):
     proc = xv("watch", job)
     assert proc.returncode == 0
     assert "run    sed -n '1,240p' src/app/paths.py" in proc.stdout
-    assert f"done | " in proc.stdout and f"xv show {job[-4:]}" in proc.stdout
+    assert "done | " in proc.stdout and f"xv show {job[-4:]}" in proc.stdout
 
 
 def test_run_prints_carry_first(xv, data):

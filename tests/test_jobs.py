@@ -4,7 +4,7 @@ import re
 import shutil
 import stat
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import pytest
 
@@ -60,10 +60,10 @@ def test_create_id_format(store):
 
 
 def test_create_id_time_is_utc(store):
-    before = datetime.now(timezone.utc).replace(microsecond=0)
+    before = datetime.now(UTC).replace(microsecond=0)
     job = new_job(store)
-    after = datetime.now(timezone.utc)
-    stamp = datetime.strptime(job.split("-")[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    after = datetime.now(UTC)
+    stamp = datetime.strptime(job.split("-")[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
     assert before <= stamp <= after
 
 

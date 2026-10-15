@@ -22,6 +22,12 @@ xv = "xvendor.cli:main"
 [dependency-groups]
 dev = ["pytest"]
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "B", "UP", "BLE001", "S110", "RUF100", "PGH003", "PGH004"]
+
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"

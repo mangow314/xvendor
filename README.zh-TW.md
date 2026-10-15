@@ -60,7 +60,7 @@ xv wait <job>                      # 等這一輪結束；rc 0 = done
 xv show <job>                      # 印出回答（response.md）
 xv ask <job> -m "Explain finding 2 in more detail"   # 追問，延續同一段對話
 xv stop <job>                      # 中途砍掉這一輪；session 保留
-xv list                            # 所有 job 的廠商、輪次、狀態、秒數
+xv list [--all]                    # 執行中＋最近 3 天的 job（--all 列全部）
 xv close <job>                     # 關掉 job 的 pane
 xv watch <job>                     # 在任何終端機跟看執行中的這一輪
 

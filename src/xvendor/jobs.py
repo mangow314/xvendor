@@ -3,7 +3,7 @@ import os
 import re
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 JOB_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-(codex|agy)-[0-9a-f]{4}$")
@@ -49,7 +49,7 @@ class JobStore:
         if not self.jobs.exists():
             self.jobs.mkdir(parents=True)
             os.chmod(self.jobs, 0o700)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         job = f"{now:%Y%m%dT%H%M%SZ}-{vendor}-{secrets.token_hex(2)}"
         d = self.jobs / job
         (d / "round-1").mkdir(parents=True)
@@ -86,6 +86,10 @@ class JobStore:
         meta = self.meta(job)
         meta.update(fields)
         self._write_meta(d, meta)
+
+    def updated(self, job: str) -> float:
+        """Last meta write: a finished round's end, or a later close."""
+        return (self._dir(job) / "meta.json").stat().st_mtime
 
     def new_round(self, job: str, request: str) -> int:
         n = self.meta(job)["round"] + 1

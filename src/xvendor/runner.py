@@ -25,9 +25,11 @@ def scrub_env(environ: Mapping[str, str]) -> dict[str, str]:
     The GIT_CONFIG_* family goes as a whole: dropping only GIT_CONFIG_KEY_n leaves
     GIT_CONFIG_COUNT behind and git then refuses to run (rc 128).
     """
-    return {k: v for k, v in environ.items()
-            if not k.startswith("GIT_CONFIG_")
-            and (k in KEEP_ENV or k.startswith("LC_") or not SECRET_ENV.search(k))}
+    return {
+        k: v
+        for k, v in environ.items()
+        if not k.startswith("GIT_CONFIG_") and (k in KEEP_ENV or k.startswith("LC_") or not SECRET_ENV.search(k))
+    }
 
 
 def _killpg(pgid: int, sig: int) -> None:
@@ -37,9 +39,15 @@ def _killpg(pgid: int, sig: int) -> None:
         pass
 
 
-def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
-              on_event: Callable[[Event], None] = lambda e: None,
-              *, popen_env: dict | None = None) -> str:
+def run_round(
+    store: JobStore,
+    job: str,
+    n: int,
+    vendor: Vendor,
+    on_event: Callable[[Event], None] = lambda e: None,
+    *,
+    popen_env: dict | None = None,
+) -> str:
     """Run round n of job to completion and return its final status (spec R4)."""
     meta = store.meta(job)
     rd = store.round_dir(job, n)
@@ -65,8 +73,15 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
             raise
         lines: list[str] = []
         with open(rd / "stderr.log", "wb") as err, open(rd / "events.jsonl", "wb") as out:
-            proc = subprocess.Popen(argv, cwd=meta["cwd"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=err, start_new_session=True, env=popen_env)
+            proc = subprocess.Popen(
+                argv,
+                cwd=meta["cwd"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=err,
+                start_new_session=True,
+                env=popen_env,
+            )
             # start_new_session makes the child its own process group leader: pgid == pid
             store.update(job, run_pgid=proc.pid)
 
@@ -106,8 +121,15 @@ def run_round(store: JobStore, job: str, n: int, vendor: Vendor,
             status = "failed"
         else:
             status = "done"
-        final = dict(status=status, rc=rc, secs=int(time.monotonic() - t0), run_pid=None, run_pgid=None,
-                     session=session or meta["session"], error=None)
+        final = dict(
+            status=status,
+            rc=rc,
+            secs=int(time.monotonic() - t0),
+            run_pid=None,
+            run_pgid=None,
+            session=session or meta["session"],
+            error=None,
+        )
         return status
     finally:
         for t in timers:

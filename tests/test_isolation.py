@@ -42,7 +42,8 @@ def test_codex_argv_structure(tmp_path, monkeypatch):
     argv = wrap("codex", ["codex", "exec", "hi"], tmp_path / "t")
 
     def has(*seq):
-        return any(argv[i:i + len(seq)] == list(seq) for i in range(len(argv)))
+        return any(argv[i : i + len(seq)] == list(seq) for i in range(len(argv)))
+
     assert argv[0] == "bwrap"
     assert has("--bind", st, st)
     assert has("--ro-bind", f"{st}/config.toml", f"{st}/config.toml")
@@ -79,15 +80,17 @@ def test_real_bwrap_codex_state(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     tmp = tmp_path_factory.mktemp("codextmp")
-    code = ("import os\n"
-            "def w(p):\n"
-            "    try: open(p, 'w').write('x'); return 'ok'\n"
-            "    except OSError: return 'denied'\n"
-            f"print(w({str(state / 'sessions/new')!r}))\n"
-            f"print(w({str(state / 'config.toml')!r}))\n"
-            f"print(w({str(state / 'hooks/x')!r}))\n"
-            f"print(open({str(state / 'auth.json')!r}).read())\n"
-            "print(os.listdir('/run'))")
+    code = (
+        "import os\n"
+        "def w(p):\n"
+        "    try: open(p, 'w').write('x'); return 'ok'\n"
+        "    except OSError: return 'denied'\n"
+        f"print(w({str(state / 'sessions/new')!r}))\n"
+        f"print(w({str(state / 'config.toml')!r}))\n"
+        f"print(w({str(state / 'hooks/x')!r}))\n"
+        f"print(open({str(state / 'auth.json')!r}).read())\n"
+        "print(os.listdir('/run'))"
+    )
     proc = subprocess.run(wrap("codex", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines() == ["ok", "denied", "denied", "TOKEN", "[]"]
@@ -115,13 +118,51 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
     if os.path.isdir("/tmp/.X11-unix"):
         hide += ["--tmpfs", "/tmp/.X11-unix"]
     assert wrap("agy", ["agy", "-p", "hi"], tmp) == [
-        "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-        *hide, "--tmpfs", f"{tmux_root}/tmux-{uid}",
-        "--tmpfs", str(home / ".ssh"), "--ro-bind", "/dev/null", str(home / ".netrc"),
-        "--bind", st, st, "--ro-bind", f"{st}/settings.json", f"{st}/settings.json",
-        "--ro-bind", f"{st}/builtin", f"{st}/builtin", "--bind", f"{tmp}/shadow/bin", f"{st}/bin",
-        "--bind", str(tmp), str(tmp), "--setenv", "TMPDIR", str(tmp),
-        "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--unshare-pid", "--die-with-parent", "--", "agy", "-p", "hi"]
+        "bwrap",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        *hide,
+        "--tmpfs",
+        f"{tmux_root}/tmux-{uid}",
+        "--tmpfs",
+        str(home / ".ssh"),
+        "--ro-bind",
+        "/dev/null",
+        str(home / ".netrc"),
+        "--bind",
+        st,
+        st,
+        "--ro-bind",
+        f"{st}/settings.json",
+        f"{st}/settings.json",
+        "--ro-bind",
+        f"{st}/builtin",
+        f"{st}/builtin",
+        "--bind",
+        f"{tmp}/shadow/bin",
+        f"{st}/bin",
+        "--bind",
+        str(tmp),
+        str(tmp),
+        "--setenv",
+        "TMPDIR",
+        str(tmp),
+        "--unsetenv",
+        "TMUX",
+        "--unsetenv",
+        "TMUX_PANE",
+        "--unshare-pid",
+        "--die-with-parent",
+        "--",
+        "agy",
+        "-p",
+        "hi",
+    ]
     assert (tmp / "shadow" / "bin").is_dir()
     assert (tmp / "shadow" / "bin" / "agentapi").read_text() == (state / "bin" / "agentapi").read_text()
 
@@ -140,11 +181,13 @@ def test_agy_x11_tmpfs_follows_host_dir(tmp_path, monkeypatch):
 def test_resolv_rebound_when_under_run(tmp_path, monkeypatch):
     real = "/run/systemd/resolve/stub-resolv.conf"
     real_realpath, real_isfile = os.path.realpath, os.path.isfile
-    monkeypatch.setattr(isolation.os.path, "realpath", lambda p, **kw: real if p == "/etc/resolv.conf" else real_realpath(p, **kw))
+    monkeypatch.setattr(
+        isolation.os.path, "realpath", lambda p, **kw: real if p == "/etc/resolv.conf" else real_realpath(p, **kw)
+    )
     monkeypatch.setattr(isolation.os.path, "isfile", lambda p: True if p == real else real_isfile(p))
     argv = wrap("agy", ["agy"], tmp_path)
-    run_at = next(i for i in range(len(argv) - 1) if argv[i:i + 2] == ["--tmpfs", "/run"])
-    bind_at = next(i for i in range(len(argv) - 2) if argv[i:i + 3] == ["--ro-bind", real, real])
+    run_at = next(i for i in range(len(argv) - 1) if argv[i : i + 2] == ["--tmpfs", "/run"])
+    bind_at = next(i for i in range(len(argv) - 2) if argv[i : i + 3] == ["--ro-bind", real, real])
     assert bind_at > run_at
 
 
@@ -205,9 +248,11 @@ def test_real_bwrap_hides_secrets(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     tmp = tmp_path_factory.mktemp("agytmp")
     # a file masked with /dev/null is mounted nodev by bwrap, so reading it fails instead of returning ""
-    code = (f"import os; print(sorted(os.listdir({str(home / '.ssh')!r})))\n"
-            f"try: print(repr(open({str(home / '.netrc')!r}).read()))\n"
-            f"except PermissionError: print('denied')")
+    code = (
+        f"import os; print(sorted(os.listdir({str(home / '.ssh')!r})))\n"
+        f"try: print(repr(open({str(home / '.netrc')!r}).read()))\n"
+        f"except PermissionError: print('denied')"
+    )
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines()[0] == "[]"
@@ -218,8 +263,12 @@ def test_real_bwrap_hides_secrets(tmp_path_factory, monkeypatch):
 @needs_bwrap
 def test_real_bwrap_hides_new_secrets(tmp_path_factory, monkeypatch):
     home = tmp_path_factory.mktemp("home")
-    files = {"projects/demo/.env": "SECRET=1", ".mozilla/firefox/p/cookies.sqlite": "c",
-             ".gemini/oauth_creds.json": "{tok}", ".codex/sessions/x.jsonl": "s"}
+    files = {
+        "projects/demo/.env": "SECRET=1",
+        ".mozilla/firefox/p/cookies.sqlite": "c",
+        ".gemini/oauth_creds.json": "{tok}",
+        ".codex/sessions/x.jsonl": "s",
+    }
     for rel, body in files.items():
         f = home / rel
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -230,14 +279,16 @@ def test_real_bwrap_hides_new_secrets(tmp_path_factory, monkeypatch):
     (state / "settings.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
     tmp = tmp_path_factory.mktemp("agytmp")
-    code = ("import os\n"
-            "def rd(p):\n"
-            "    try: return repr(open(p).read())\n"
-            "    except PermissionError: return 'denied'\n"
-            f"print(rd({str(home / 'projects/demo/.env')!r}))\n"
-            f"print(rd({str(home / '.gemini/oauth_creds.json')!r}))\n"
-            f"print(os.listdir({str(home / '.mozilla')!r}))\n"
-            f"print(os.listdir({str(home / '.codex/sessions')!r}))")
+    code = (
+        "import os\n"
+        "def rd(p):\n"
+        "    try: return repr(open(p).read())\n"
+        "    except PermissionError: return 'denied'\n"
+        f"print(rd({str(home / 'projects/demo/.env')!r}))\n"
+        f"print(rd({str(home / '.gemini/oauth_creds.json')!r}))\n"
+        f"print(os.listdir({str(home / '.mozilla')!r}))\n"
+        f"print(os.listdir({str(home / '.codex/sessions')!r}))"
+    )
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout.splitlines()
@@ -269,9 +320,11 @@ def test_real_bwrap_hides_run_and_x11(tmp_path_factory, monkeypatch):
     (state / "settings.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
     tmp = tmp_path_factory.mktemp("agytmp")
-    code = ("import os; print(os.listdir('/run'))\n"
-            "print(os.listdir('/tmp/.X11-unix') if os.path.isdir('/tmp/.X11-unix') else [])\n"
-            "print(len(open('/etc/resolv.conf').read()) >= 0)")
+    code = (
+        "import os; print(os.listdir('/run'))\n"
+        "print(os.listdir('/tmp/.X11-unix') if os.path.isdir('/tmp/.X11-unix') else [])\n"
+        "print(len(open('/etc/resolv.conf').read()) >= 0)"
+    )
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.splitlines() == ["[]", "[]", "True"]
@@ -288,11 +341,17 @@ def test_real_bwrap_gemini_narrowed(tmp_path_factory, monkeypatch):
     (home / ".gemini" / "settings.json").write_text("{}")
     monkeypatch.setenv("HOME", str(home))
     tmp = tmp_path_factory.mktemp("agytmp")
-    targets = {"state": state / "brain-x", "config": state / "settings.json", "bin": state / "bin" / "agentapi",
-               "top": home / ".gemini" / "settings.json"}
-    code = "import sys\nfor name, path in " + repr([(k, str(v)) for k, v in targets.items()]) + ":\n" \
-           "    try: open(path, 'w').write('x'); print(name, 'ok')\n" \
-           "    except OSError: print(name, 'denied')"
+    targets = {
+        "state": state / "brain-x",
+        "config": state / "settings.json",
+        "bin": state / "bin" / "agentapi",
+        "top": home / ".gemini" / "settings.json",
+    }
+    code = (
+        "import sys\nfor name, path in " + repr([(k, str(v)) for k, v in targets.items()]) + ":\n"
+        "    try: open(path, 'w').write('x'); print(name, 'ok')\n"
+        "    except OSError: print(name, 'denied')"
+    )
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.split("\n")[:4] == ["state ok", "config denied", "bin ok", "top denied"]
@@ -349,10 +408,12 @@ def _agy_token_home(tmp_path_factory, monkeypatch):
     (state / "antigravity-oauth-token").write_text("AGYTOKEN")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CODEX_HOME", raising=False)
-    code = ("import os\n"
-            "try: print(open(" + repr(str(state / "antigravity-oauth-token")) + ").read() or 'EMPTY')\n"
-            "except OSError: print('DENIED')\n"
-            "print(sorted(os.listdir(" + repr(str(state / "conversations")) + ")))")
+    code = (
+        "import os\n"
+        "try: print(open(" + repr(str(state / "antigravity-oauth-token")) + ").read() or 'EMPTY')\n"
+        "except OSError: print('DENIED')\n"
+        "print(sorted(os.listdir(" + repr(str(state / "conversations")) + ")))"
+    )
     return code, tmp_path_factory.mktemp("vtmp")
 
 
@@ -391,7 +452,7 @@ def make_worktree(base: Path, name="wt") -> tuple[Path, Path]:
 
 
 def seq_at(argv, *seq):
-    return [i for i in range(len(argv)) if argv[i:i + len(seq)] == list(seq)]
+    return [i for i in range(len(argv)) if argv[i : i + len(seq)] == list(seq)]
 
 
 @needs_git
@@ -423,8 +484,9 @@ def test_write_argv_gitdir_readonly(tmp_path, monkeypatch):
 def test_linked_worktree_gitdir_ok_and_refusals(tmp_path):
     wt, gitdir = make_worktree(tmp_path)
     assert isolation.linked_worktree_gitdir(wt) == gitdir.resolve()
-    subprocess.run(["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")],
-                   check=True)
+    subprocess.run(
+        ["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")], check=True
+    )
     plain = tmp_path / "plain"
     plain.mkdir()
     for bad in (tmp_path / "sepwt", plain, tmp_path / "main"):
@@ -454,8 +516,9 @@ def test_real_bwrap_write_dir_only(tmp_path_factory):
     proc = subprocess.run(wrap("agy", probe(work / "xv-probe"), tmp, work), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert (work / "xv-probe").read_text() == "x"
-    proc = subprocess.run(wrap("agy", probe(outside / "xv-probe"), tmp, work), capture_output=True, text=True,
-                          timeout=30)
+    proc = subprocess.run(
+        wrap("agy", probe(outside / "xv-probe"), tmp, work), capture_output=True, text=True, timeout=30
+    )
     assert proc.returncode != 0
     assert not (outside / "xv-probe").exists()
 
@@ -468,14 +531,16 @@ def test_real_bwrap_worktree_status_ok_commit_denied(tmp_path_factory, monkeypat
     main = base / "main"
     _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
     g = "git -c safe.directory='*'"
-    script = (f"cd {base}\n"
-              "echo hi > wt/hello.txt; echo write=$?\n"
-              f"{g} -C wt status --porcelain > {tmp}/st.out 2>&1; echo status=$?; sed 's/^/ST:/' {tmp}/st.out\n"
-              f"{g} -C wt diff --stat >/dev/null 2>&1; echo diff=$?\n"
-              f"{g} -C wt add hello.txt >/dev/null 2>&1; echo add=$?\n"
-              f"{g} -C wt -c user.name=t -c user.email=t@x commit -qam x >/dev/null 2>&1; echo commit=$?\n"
-              "echo x >> main/a.txt 2>/dev/null; echo mainwrite=$?\n"
-              "ls main/.git/hooks >/dev/null 2>&1; echo hooks=$?\n")
+    script = (
+        f"cd {base}\n"
+        "echo hi > wt/hello.txt; echo write=$?\n"
+        f"{g} -C wt status --porcelain > {tmp}/st.out 2>&1; echo status=$?; sed 's/^/ST:/' {tmp}/st.out\n"
+        f"{g} -C wt diff --stat >/dev/null 2>&1; echo diff=$?\n"
+        f"{g} -C wt add hello.txt >/dev/null 2>&1; echo add=$?\n"
+        f"{g} -C wt -c user.name=t -c user.email=t@x commit -qam x >/dev/null 2>&1; echo commit=$?\n"
+        "echo x >> main/a.txt 2>/dev/null; echo mainwrite=$?\n"
+        "ls main/.git/hooks >/dev/null 2>&1; echo hooks=$?\n"
+    )
     proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
     print(proc.stdout, proc.stderr)
     rc = dict(l.split("=", 1) for l in proc.stdout.splitlines() if "=" in l and not l.startswith("ST:"))
@@ -500,10 +565,12 @@ def test_real_bwrap_worktree_pointers_readonly(tmp_path_factory, monkeypatch):
     _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
     pointer = (wt / ".git").read_text()
     commondir = (gitdir / "commondir").read_text()
-    script = (f"echo x > {wt}/.git 2>/dev/null; echo dotgit=$?\n"
-              f"echo x > {gitdir}/commondir 2>/dev/null; echo commondir=$?\n"
-              f"touch {gitdir}/xv-index-probe 2>/dev/null; echo probe=$?\n"
-              f"git -c safe.directory='*' -C {wt} status --porcelain >/dev/null 2>&1; echo status=$?\n")
+    script = (
+        f"echo x > {wt}/.git 2>/dev/null; echo dotgit=$?\n"
+        f"echo x > {gitdir}/commondir 2>/dev/null; echo commondir=$?\n"
+        f"touch {gitdir}/xv-index-probe 2>/dev/null; echo probe=$?\n"
+        f"git -c safe.directory='*' -C {wt} status --porcelain >/dev/null 2>&1; echo status=$?\n"
+    )
     proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
     rc = dict(l.split("=", 1) for l in proc.stdout.splitlines() if "=" in l)
     assert rc["dotgit"] != "0" and rc["commondir"] != "0", proc.stdout
@@ -521,8 +588,7 @@ def test_real_bwrap_write_dir_keeps_env_hidden(tmp_path_factory, monkeypatch):
     repo.mkdir()
     wt, _ = make_worktree(home / "projects", "demo-wt")
     (wt / ".env").write_text("SECRET=1")
-    script = (f"cat {wt}/.env 2>/dev/null; echo cat=$?\n"
-              f"echo hi > {wt}/other.txt; echo write=$?\n")
+    script = f"cat {wt}/.env 2>/dev/null; echo cat=$?\necho hi > {wt}/other.txt; echo write=$?\n"
     proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
     assert "SECRET" not in proc.stdout, proc.stdout
     assert "write=0" in proc.stdout, proc.stdout
@@ -537,16 +603,18 @@ def test_real_bwrap_gitdir_readonly_status_ok(tmp_path_factory, monkeypatch):
     wt, gitdir = make_worktree(base)
     _, tmp = _agy_token_home(tmp_path_factory, monkeypatch)
     g = "git -c safe.directory='*'"
-    script = (f"cd {base}\n"
-              "echo hi > wt/hello.txt; echo write=$?\n"
-              f"{g} -C wt status --porcelain > {tmp}/st.out 2>&1; echo status=$?; sed 's/^/ST:/' {tmp}/st.out\n"
-              f"{g} -C wt diff --stat >/dev/null 2>&1; echo diff=$?\n"
-              f"{g} -C wt add hello.txt >/dev/null 2>&1; echo add=$?\n"
-              f"{g} -C wt -c user.name=t -c user.email=t@x commit -qam x >/dev/null 2>&1; echo commit=$?\n"
-              f"echo 'ref: refs/heads/main' > {gitdir}/HEAD 2>/dev/null; echo head=$?\n"
-              f"touch {gitdir}/config.worktree 2>/dev/null; echo cfgwt=$?\n"
-              f"cd wt && git init -q sub && git -C sub config core.fsmonitor 'touch {base}/MARK'; cd ..\n"
-              f"{g} -C wt add sub >/dev/null 2>&1; echo addsub=$?\n")
+    script = (
+        f"cd {base}\n"
+        "echo hi > wt/hello.txt; echo write=$?\n"
+        f"{g} -C wt status --porcelain > {tmp}/st.out 2>&1; echo status=$?; sed 's/^/ST:/' {tmp}/st.out\n"
+        f"{g} -C wt diff --stat >/dev/null 2>&1; echo diff=$?\n"
+        f"{g} -C wt add hello.txt >/dev/null 2>&1; echo add=$?\n"
+        f"{g} -C wt -c user.name=t -c user.email=t@x commit -qam x >/dev/null 2>&1; echo commit=$?\n"
+        f"echo 'ref: refs/heads/main' > {gitdir}/HEAD 2>/dev/null; echo head=$?\n"
+        f"touch {gitdir}/config.worktree 2>/dev/null; echo cfgwt=$?\n"
+        f"cd wt && git init -q sub && git -C sub config core.fsmonitor 'touch {base}/MARK'; cd ..\n"
+        f"{g} -C wt add sub >/dev/null 2>&1; echo addsub=$?\n"
+    )
     proc = subprocess.run(wrap("agy", ["sh", "-c", script], tmp, wt), capture_output=True, text=True, timeout=60)
     print(proc.stdout, proc.stderr)
     rc = dict(l.split("=", 1) for l in proc.stdout.splitlines() if "=" in l and not l.startswith("ST:"))

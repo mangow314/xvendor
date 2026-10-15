@@ -46,6 +46,7 @@ def env(fakes_dir):
             e["XV_FAKE_FIXTURE"] = str(fixture)
         e.update({k: str(v) for k, v in extra.items()})
         return e
+
     return make
 
 
@@ -60,6 +61,7 @@ def stop_when_running(store, job):
                 runner.stop(store, job)
                 return
             time.sleep(0.05)
+
     t = threading.Thread(target=go)
     t.start()
     return t
@@ -113,8 +115,7 @@ def test_stop_keeps_session(store, tmp_path, env, fixture_path):
     job = new_job(store, tmp_path)
     store.update(job, session="kept-session")
     t = stop_when_running(store, job)
-    status = runner.run_round(store, job, 1, CodexVendor(),
-                              popen_env=env(fixture_path("codex-done"), XV_FAKE_DELAY=2))
+    status = runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"), XV_FAKE_DELAY=2))
     t.join()
     m = store.meta(job)
     assert status == "stopped" == m["status"]
@@ -134,6 +135,7 @@ def test_agy_stop_kills_whole_group(store, tmp_path, env, fixture_path):
                 runner.stop(store, job)
                 return
             time.sleep(0.05)
+
     t = threading.Thread(target=go)
     t.start()
     status = runner.run_round(store, job, 1, AgyVendor(), popen_env=env(fixture_path("agy-done"), XV_FAKE_DELAY=2))
@@ -183,25 +185,41 @@ def test_stop_rejects_missing_pgid(store, tmp_path):
 
 
 def test_scrub_env():
-    environ = {"PATH": "/x", "JINA_API_KEY": "a", "CLOUDSDK_PROXY_PASSWORD": "b", "GITHUB_TOKEN": "c",
-               "AWS_SECRET_ACCESS_KEY": "d", "MY_CREDENTIALS": "e", "OAUTH_THING": "f", "XV_DATA": "/d",
-               "CODEX_HOME": "/c", "LC_ALL": "C", "EDITOR": "nvim"}
+    environ = {
+        "PATH": "/x",
+        "JINA_API_KEY": "a",
+        "CLOUDSDK_PROXY_PASSWORD": "b",
+        "GITHUB_TOKEN": "c",
+        "AWS_SECRET_ACCESS_KEY": "d",
+        "MY_CREDENTIALS": "e",
+        "OAUTH_THING": "f",
+        "XV_DATA": "/d",
+        "CODEX_HOME": "/c",
+        "LC_ALL": "C",
+        "EDITOR": "nvim",
+    }
     assert set(runner.scrub_env(environ)) == {"PATH", "XV_DATA", "CODEX_HOME", "LC_ALL", "EDITOR"}
 
 
 def test_scrub_env_drops_git_config_family():
-    environ = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "1",
-               "GIT_CONFIG_PARAMETERS": "'a.b=1'", "PATH": "/x", "GIT_EDITOR": "true"}
+    environ = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "a.b",
+        "GIT_CONFIG_VALUE_0": "1",
+        "GIT_CONFIG_PARAMETERS": "'a.b=1'",
+        "PATH": "/x",
+        "GIT_EDITOR": "true",
+    }
     out = runner.scrub_env(environ)
     assert not any(k.startswith("GIT_CONFIG_") for k in out)
     assert {"PATH", "GIT_EDITOR"} <= set(out)
 
     if not shutil.which("git"):
         pytest.skip("git not installed")
-    env = runner.scrub_env({**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "x.y",
-                            "GIT_CONFIG_VALUE_0": "1"})
-    r = subprocess.run(["git", "status", "--short"], env=env, cwd=os.path.dirname(__file__),
-                       capture_output=True)
+    env = runner.scrub_env(
+        {**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "x.y", "GIT_CONFIG_VALUE_0": "1"}
+    )
+    r = subprocess.run(["git", "status", "--short"], env=env, cwd=os.path.dirname(__file__), capture_output=True)
     assert r.returncode == 0
 
 
@@ -214,6 +232,7 @@ def test_nested_git_written_on_failed_round(store, tmp_path, env, fixture_path, 
 
     def boom(event):
         raise RuntimeError("display went away")
+
     with pytest.raises(RuntimeError, match="display went away"):
         runner.run_round(store, job, 1, CodexVendor(), boom, popen_env=env(fixture_path("codex-done")))
     m = store.meta(job)

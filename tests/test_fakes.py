@@ -16,8 +16,9 @@ def fixture_file(tmp_path):
 
 
 def run_fake(fakes_dir, name, env, *args):
-    return subprocess.run([str(fakes_dir / name), *args], capture_output=True, text=True,
-                          env={**os.environ, **env}, timeout=10)
+    return subprocess.run(
+        [str(fakes_dir / name), *args], capture_output=True, text=True, env={**os.environ, **env}, timeout=10
+    )
 
 
 @pytest.mark.parametrize("name", ["codex", "agy"])

@@ -15,23 +15,42 @@ class UnsupportedPlatform(Exception):
 
 # Home-relative credential paths hidden from the sandboxed vendor: SSH and GPG keys, cloud, Kubernetes and GitHub CLI
 # logins, git / npm / Postgres / netrc credentials, and the Claude Code and codex login tokens.
-SECRET_PATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".kube", ".git-credentials", ".npmrc", ".pgpass",
-                ".netrc", ".claude/.credentials.json",
-                ".codex/auth.json",
-                # agy login token and conversation store; agy itself keeps them via own_state
-                ".gemini/antigravity-cli/antigravity-oauth-token", ".gemini/antigravity-cli/conversations",
-                # Gemini OAuth tokens and account list
-                ".gemini/oauth_creds.json", ".gemini/google_accounts.json",
-                # browser profiles (cookies, saved logins)
-                ".mozilla", ".config/google-chrome", ".config/chromium", ".config/BraveSoftware",
-                # Bitwarden CLI session / vault data
-                ".config/Bitwarden CLI",
-                # gcloud credentials, Docker registry logins, pass(1) password store
-                ".config/gcloud", ".docker/config.json", ".password-store",
-                # Claude Code account state and conversation transcripts
-                ".claude.json", ".claude/projects",
-                # codex conversation transcripts and prompt history
-                ".codex/sessions", ".codex/history.jsonl")
+SECRET_PATHS = (
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".config/gh",
+    ".kube",
+    ".git-credentials",
+    ".npmrc",
+    ".pgpass",
+    ".netrc",
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+    # agy login token and conversation store; agy itself keeps them via own_state
+    ".gemini/antigravity-cli/antigravity-oauth-token",
+    ".gemini/antigravity-cli/conversations",
+    # Gemini OAuth tokens and account list
+    ".gemini/oauth_creds.json",
+    ".gemini/google_accounts.json",
+    # browser profiles (cookies, saved logins)
+    ".mozilla",
+    ".config/google-chrome",
+    ".config/chromium",
+    ".config/BraveSoftware",
+    # Bitwarden CLI session / vault data
+    ".config/Bitwarden CLI",
+    # gcloud credentials, Docker registry logins, pass(1) password store
+    ".config/gcloud",
+    ".docker/config.json",
+    ".password-store",
+    # Claude Code account state and conversation transcripts
+    ".claude.json",
+    ".claude/projects",
+    # codex conversation transcripts and prompt history
+    ".codex/sessions",
+    ".codex/history.jsonl",
+)
 
 # Home-relative glob patterns for per-project secret files: .env, .env.* and .envrc.
 SECRET_GLOBS = ("projects/*/.env", "projects/*/.env.*", "projects/*/*/.env", "projects/*/.envrc")
@@ -127,14 +146,23 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
         extra = sorted(p.name for p in state.glob("*.config.toml")) if state.is_dir() else []
         return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state, writable)
     state = state_dir("agy")
-    return _bwrap("agy", argv, tmpdir, state, STATE_READONLY, STATE_READONLY + STATE_SHADOW, state, writable,
-                  shadow_entries=STATE_SHADOW)
+    return _bwrap(
+        "agy",
+        argv,
+        tmpdir,
+        state,
+        STATE_READONLY,
+        STATE_READONLY + STATE_SHADOW,
+        state,
+        writable,
+        shadow_entries=STATE_SHADOW,
+    )
 
 
 def _walk_symlinks_outside(start: Path, forbidden: Path) -> None:
     """Resolve start component by component (like realpath); raise ValueError if any symlink met on the way
     lives inside forbidden (resolved), because the vendor could re-point it."""
-    parts = list(Path(os.path.abspath(start)).parts)   # ('/', 'a', 'b', ...)
+    parts = list(Path(os.path.abspath(start)).parts)  # ('/', 'a', 'b', ...)
     cur = Path(parts.pop(0))
     hops = 0
     while parts:
@@ -142,13 +170,13 @@ def _walk_symlinks_outside(start: Path, forbidden: Path) -> None:
         if part == ".":
             continue
         if part == "..":
-            cur = cur.parent   # cur is always a physical path here, so .parent is the real parent
+            cur = cur.parent  # cur is always a physical path here, so .parent is the real parent
             if Path(os.path.realpath(cur)).is_relative_to(forbidden):
                 raise ValueError(f"{cur} lies inside {forbidden} on the gitdir path")
             continue
         cur = cur / part
         if Path(os.path.realpath(cur)).is_relative_to(forbidden):
-            raise ValueError(f"{cur} lies inside {forbidden} on the gitdir path")   # real dir or symlink alike
+            raise ValueError(f"{cur} lies inside {forbidden} on the gitdir path")  # real dir or symlink alike
         while cur.is_symlink():
             hops += 1
             if hops > 40:
@@ -162,14 +190,16 @@ def _walk_symlinks_outside(start: Path, forbidden: Path) -> None:
             else:
                 parts = list(Path(target).parts) + parts
                 cur = cur.parent
-            break   # the pushed-back parts are consumed by the outer loop
+            break  # the pushed-back parts are consumed by the outer loop
 
 
 def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Path:
     """The gitdir of the linked worktree at writable (its index lives there). Raise ValueError unless writable/.git
     is a pointer file to <repo>/.git/worktrees/<name> whose commondir leads back to <repo>/.git."""
+
     def bad(why: str) -> ValueError:
         return ValueError(f"--write needs a linked worktree (git worktree add): {why}")
+
     dotgit = writable / ".git"
     if dotgit.is_symlink():
         raise bad(f"{dotgit} is a symlink")
@@ -205,7 +235,9 @@ def linked_worktree_gitdir(writable: Path, own_state: Path | None = None) -> Pat
     if own_state is not None and common.is_relative_to(own_state.resolve()):
         raise bad(f"{common} lies inside the vendor state dir {own_state}, which is writable for the vendor")
     if own_state is not None and own_state.resolve().is_relative_to(common):
-        raise bad(f"the vendor state dir {own_state} lies inside {common}, which would make the repository metadata writable")
+        raise bad(
+            f"the vendor state dir {own_state} lies inside {common}, which would make the repository metadata writable"
+        )
     if hit := _under_hidden(Path.home(), common):
         raise bad(f"{common} lies inside {hit}, which xv hides from the vendor")
     return gitdir
@@ -237,8 +269,17 @@ def nested_git(writable: Path) -> list[str]:
     return sorted(found)
 
 
-def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_entries, required_entries,
-           own_state: Path, writable: Path | None = None, shadow_entries=()) -> list[str]:
+def _bwrap(
+    vendor: str,
+    argv: list[str],
+    tmpdir: Path,
+    state: Path,
+    readonly_entries,
+    required_entries,
+    own_state: Path,
+    writable: Path | None = None,
+    shadow_entries=(),
+) -> list[str]:
     """Shared bwrap line: read-only root, hidden sockets and secrets, writable state dir with its
     config-like entries re-protected, writable tmpdir. Layout measured for agy 2026-10-12."""
     # A read-only mount does not stop connect() to path-based unix sockets, so hide the whole of /run:
@@ -283,7 +324,9 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
         src = state / rel
         if not os.path.exists(src):
             if rel in required_entries:
-                raise UnsupportedPlatform(f"{src} is missing; create it (or run {vendor} once) so it exists, then retry")
+                raise UnsupportedPlatform(
+                    f"{src} is missing; create it (or run {vendor} once) so it exists, then retry"
+                )
             continue
         dst = tmpdir / "shadow" / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -297,9 +340,35 @@ def _bwrap(vendor: str, argv: list[str], tmpdir: Path, state: Path, readonly_ent
         # the vendor cannot add (gitlinks included), commit, switch branches or plant config the host's git would
         # read. DIR/.git is ro-bound back after the --bind of DIR.
         linked_worktree_gitdir(writable, own_state)  # validate only
-        write += ["--bind", str(writable), str(writable), "--ro-bind", str(writable / ".git"),
-                  str(writable / ".git")]
+        write += ["--bind", str(writable), str(writable), "--ro-bind", str(writable / ".git"), str(writable / ".git")]
         write += hide_after
-    return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", *hide,
-            "--bind", str(state), str(state), *protect, *write, "--bind", tmp, tmp, "--setenv", "TMPDIR", tmp,
-            "--unsetenv", "TMUX", "--unsetenv", "TMUX_PANE", "--unshare-pid", "--die-with-parent", "--", *argv]
+    return [
+        "bwrap",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        *hide,
+        "--bind",
+        str(state),
+        str(state),
+        *protect,
+        *write,
+        "--bind",
+        tmp,
+        tmp,
+        "--setenv",
+        "TMPDIR",
+        tmp,
+        "--unsetenv",
+        "TMUX",
+        "--unsetenv",
+        "TMUX_PANE",
+        "--unshare-pid",
+        "--die-with-parent",
+        "--",
+        *argv,
+    ]

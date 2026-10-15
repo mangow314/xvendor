@@ -287,7 +287,8 @@ only for your own repositories.
   reading and writing (`Operation not permitted` instead of an empty file).
   Unix sockets are denied except DNS (`mDNSResponder`) and sockets inside
   the writable directories, which covers docker, ssh-agent and tmux. Signals
-  and process info are limited to processes in the same sandbox.
+  are limited to processes in the same sandbox; a rule does the same for
+  process info, not measured because `ps` cannot run in the sandbox.
 - **A throwaway HOME instead of bind mounts.** agy has no option for its
   state directory and Seatbelt cannot mount, so each round runs agy with
   `HOME` set to a folder in the round's temp directory. Every entry of
@@ -295,12 +296,15 @@ only for your own repositories.
   path (the profile decides what may be written), except `bin`, which is a
   copy deleted with the round. `Library/Keychains` points at the real one so
   agy still finds its login, which it keeps in the Keychain. Commands agy
-  runs see this HOME too, so they do not read your shell or git config.
+  runs see this HOME too, so they do not read your shell or git config
+  (unless `XDG_CONFIG_HOME` is set, which `xv` passes through).
 - **codex keeps only its own sandbox.** codex's `-s read-only` is itself a
   Seatbelt sandbox and Seatbelt cannot be applied twice
   (`sandbox_apply: Operation not permitted`), so `xv` does not wrap codex on
-  macOS. codex's sandbox denies all writes and network access for the
-  commands it runs, but does not hide credential files.
+  macOS. In read mode codex's sandbox denies all writes and network access
+  for the commands it runs; in write mode (`workspace-write`) it may write
+  in `DIR`, and `DIR/.git` is not protected the way `xv` does on Linux.
+  Neither mode hides credential files.
 - **Other gaps Linux does not have.** The Keychain is readable, because agy
   needs its own token from it: any item whose access list lets the
   `security` tool read it without asking is exposed. The vendor inherits

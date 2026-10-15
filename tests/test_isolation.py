@@ -259,7 +259,12 @@ def test_seatbelt_agy_layout(tmp_path, monkeypatch):
         assert params[str(state / name)][0].startswith("R")
     assert params[str(home / ".ssh")][0].startswith("S")
     assert params[str(home / ".gemini" / "oauth_creds.json")][0].startswith("S")
-    assert profile.index("(deny file-write*)") < profile.index("(allow file-write*") < profile.index('(param "R0")')
+    assert (
+        profile.index("(deny file-write*)")
+        < profile.index("(allow file-write*")
+        < profile.index('(param "R0")')
+        < profile.index('(param "S0")')
+    )
     assert "(deny network-outbound (remote unix-socket))" in profile
     assert '(deny process-exec (literal "/usr/bin/open")' in profile
     fake = tmp / "home"

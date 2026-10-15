@@ -93,7 +93,8 @@ def probe(vendor: str, spec: dict, tmpdir: Path) -> dict:
 def expect(vendor: str, got: dict, name: str, allowed: bool) -> None:
     if name not in got:
         return
-    ok = (got[name] == "ok") == allowed
+    # denied means EPERM from the sandbox: a missing file, a refused connection or a timeout proves nothing
+    ok = got[name] == "ok" if allowed else got[name].startswith("PermissionError: [Errno 1]")
     report(ok, f"{vendor}: {name} {'allowed' if allowed else 'denied'}", got[name])
 
 
@@ -192,7 +193,7 @@ def part2() -> None:
             report(False, f"{vendor}: xv start", start.stderr.strip()[-400:])
             continue
         job = start.stdout.strip()
-        for n, check in ((1, "xv-smoke-hi"), (2, None)):
+        for n in (1, 2):
             if n == 2:
                 ask = xv("ask", job, "-m", "What exact text did the command print? Reply with that text only.")
                 if ask.returncode != 0:

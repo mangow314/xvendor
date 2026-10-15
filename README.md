@@ -86,7 +86,7 @@ xv wait <job>                      # block until the round ends; rc 0 = done
 xv show <job>                      # print the answer (response.md)
 xv ask <job> -m "Explain finding 2 in more detail"   # follow-up, same conversation
 xv stop <job>                      # cut a round short; the session is kept
-xv list                            # all jobs with vendor, round, status, seconds
+xv list [--all]                    # running jobs + jobs from the last 3 days (--all: every job)
 xv close <job>                     # close the job's pane
 xv watch <job>                     # follow a running round from any terminal
 

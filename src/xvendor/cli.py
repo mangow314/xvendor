@@ -12,6 +12,7 @@ from xvendor import isolation, panes, runner
 from xvendor.jobs import JobError, JobStore
 
 DEFAULT_TIMEOUT = 1200
+LIST_DAYS = 3
 PROFILE_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -77,7 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("job")
     p.add_argument("round", nargs="?", type=nonneg_int)
 
-    sub.add_parser("list", help="list jobs")
+    p = sub.add_parser("list", help=f"list running jobs and jobs updated in the last {LIST_DAYS} days")
+    p.add_argument("--all", action="store_true", help="list every job")
 
     for name, text in [("stop", "stop the current round (session kept)"),
                        ("close", "close a finished job's pane"),
@@ -201,9 +203,11 @@ def cmd_show(store: JobStore, args) -> int:
 
 
 def cmd_list(store: JobStore, args) -> int:
+    cutoff = time.time() - LIST_DAYS * 86400
     rows = [[job, m["vendor"], f"r{m['round']}", m["status"], "-" if m["secs"] is None else str(m["secs"]),
              f"write:{m['writable']}" if m.get("mode", "read") == "write" else "-"]
-            for job, m in store.list()]
+            for job, m in store.list()
+            if args.all or m["status"] == "running" or store.updated(job) >= cutoff]
     if rows:
         widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
         for r in rows:

@@ -64,6 +64,10 @@ class JobStore:
         meta.update(fields)
         self._write_meta(d, meta)
 
+    def updated(self, job: str) -> float:
+        """Last meta write: a finished round's end, or a later close."""
+        return (self._dir(job) / "meta.json").stat().st_mtime
+
     def new_round(self, job: str, request: str) -> int:
         n = self.meta(job)["round"] + 1
         rd = self._dir(job) / f"round-{n}"

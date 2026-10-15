@@ -42,7 +42,7 @@ xv wait  <job-id> [--timeout SEC]        # blocks until the round is no longer r
 xv show  <job-id> [ROUND]                # prints response.md (latest round by default)
 xv ask   <job-id> --file F | -m TEXT [--timeout SEC]   # follow-up: resumes the same conversation in the same pane
 xv stop  <job-id>                        # kills the current round (the session is kept), then xv ask to redirect
-xv list                                  # every job with vendor, round, status and seconds
+xv list [--all]                          # running jobs and jobs from the last 3 days, with vendor, round, status and seconds (--all: every job)
 xv close <job-id>                        # closes the job's pane (run once per job when done)
 xv watch <job-id>                        # follows the current round from any terminal (for the user)
 ```

@@ -14,8 +14,9 @@ def _tmux_usable(tmp_path_factory) -> str | None:
     if shutil.which("tmux") is None:
         return "tmux not installed"
     sock = tmp_path_factory.mktemp("tmuxprobe") / "s"
-    proc = subprocess.run(["tmux", "-S", str(sock), "-f", "/dev/null", "new-session", "-d", "sleep 5"],
-                          capture_output=True, text=True)
+    proc = subprocess.run(
+        ["tmux", "-S", str(sock), "-f", "/dev/null", "new-session", "-d", "sleep 5"], capture_output=True, text=True
+    )
     subprocess.run(["tmux", "-S", str(sock), "kill-server"], capture_output=True)
     return None if proc.returncode == 0 else f"cannot start an isolated tmux server: {proc.stderr.strip()}"
 
@@ -28,10 +29,12 @@ def server(tmp_path_factory, monkeypatch, fakes_dir, fixture_path):
     env = {k: v for k, v in os.environ.items() if not k.startswith("TMUX")}
     # panes inherit the server's environment: point vendor CLIs at the fakes
     env.update(PATH=f"{fakes_dir}{os.pathsep}{env.get('PATH', '')}", XV_FAKE_FIXTURE=str(fixture_path("codex-done")))
-    subprocess.run(["tmux", "-S", str(sock), "-f", "/dev/null", "new-session", "-d", "-x", "200", "-y", "50"],
-                   check=True, env=env)
-    caller = subprocess.run(["tmux", "-S", str(sock), "display-message", "-p", "#{pane_id}"],
-                            capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(
+        ["tmux", "-S", str(sock), "-f", "/dev/null", "new-session", "-d", "-x", "200", "-y", "50"], check=True, env=env
+    )
+    caller = subprocess.run(
+        ["tmux", "-S", str(sock), "display-message", "-p", "#{pane_id}"], capture_output=True, text=True, check=True
+    ).stdout.strip()
     # with $TMUX set, a plain `tmux` client talks to this server
     monkeypatch.setenv("TMUX", f"{sock},0,0")
     monkeypatch.setenv("TMUX_PANE", caller)
@@ -40,8 +43,9 @@ def server(tmp_path_factory, monkeypatch, fakes_dir, fixture_path):
 
 
 def fmt(pane, f):
-    return subprocess.run(["tmux", "display-message", "-p", "-t", pane, f],
-                          capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane, f], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def pane_count(pane):
@@ -103,8 +107,9 @@ def test_close_leaves_unmarked_pane(server, store, tmp_path):
 
 
 def history(pane):
-    return subprocess.run(["tmux", "capture-pane", "-p", "-S", "-", "-t", pane],
-                          capture_output=True, text=True, check=True).stdout
+    return subprocess.run(
+        ["tmux", "capture-pane", "-p", "-S", "-", "-t", pane], capture_output=True, text=True, check=True
+    ).stdout
 
 
 def wait_done(store, job):

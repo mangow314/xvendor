@@ -35,8 +35,10 @@ def vendor_for(name: str):
     # imported lazily so `xv list` does not pay for vendor modules
     if name == "codex":
         from xvendor.vendors.codex import CodexVendor
+
         return CodexVendor()
     from xvendor.vendors.agy import AgyVendor
+
     return AgyVendor()
 
 
@@ -79,9 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list", help="list jobs")
 
-    for name, text in [("stop", "stop the current round (session kept)"),
-                       ("close", "close a finished job's pane"),
-                       ("watch", "follow the current round in this terminal")]:
+    for name, text in [
+        ("stop", "stop the current round (session kept)"),
+        ("close", "close a finished job's pane"),
+        ("watch", "follow the current round in this terminal"),
+    ]:
         sub.add_parser(name, help=text).add_argument("job")
 
     p = sub.add_parser("_run")  # internal: one round, started by a pane or in the background
@@ -118,9 +122,11 @@ def cmd_start(store: JobStore, args) -> int:
             raise Fail(str(e)) from None
         try:
             if isolation.has_gitlinks(writable):
-                raise Fail(f"--write refuses {writable}: its index has submodule entries (gitlinks); a vendor could plant "
-                           "config in a submodule that your next git diff would run. Use a worktree of a repository "
-                           "without submodules")
+                raise Fail(
+                    f"--write refuses {writable}: its index has submodule entries (gitlinks); a vendor could plant "
+                    "config in a submodule that your next git diff would run. Use a worktree of a repository "
+                    "without submodules"
+                )
         except ValueError as e:
             raise Fail(f"--write: {e}") from None
     cwd = Path(args.cwd or writable or os.getcwd())
@@ -140,8 +146,15 @@ def cmd_start(store: JobStore, args) -> int:
             raise Fail(f"codex profile not found: {codex_home / (args.profile + '.config.toml')}")
     if writable is not None and (busy := store.running_writable(str(writable))):
         raise Fail(f"another job is still writing {writable}: {busy}")
-    job = store.create(args.vendor, str(cwd.resolve()), args.timeout, args.no_pane, args.profile, req,
-                       str(writable) if writable else None)
+    job = store.create(
+        args.vendor,
+        str(cwd.resolve()),
+        args.timeout,
+        args.no_pane,
+        args.profile,
+        req,
+        str(writable) if writable else None,
+    )
     panes.launch(store, job, 1)
     if args.no_pane or not panes.in_tmux():
         print(f"xv: no pane; follow with: xv watch {job}", file=sys.stderr)
@@ -158,7 +171,9 @@ def cmd_ask(store: JobStore, args) -> int:
     if meta["status"] == "running":
         raise Fail(f"job is still running; run xv wait {job} first")
     if not meta["session"]:
-        raise Fail("job has no session id (the last round may have failed), so it cannot be asked again; start a new job")
+        raise Fail(
+            "job has no session id (the last round may have failed), so it cannot be asked again; start a new job"
+        )
     if meta.get("mode", "read") == "write" and (busy := store.running_writable(meta["writable"])):
         raise Fail(f"another job is still writing {meta['writable']}: {busy}")
     n = store.new_round(job, req)
@@ -201,9 +216,17 @@ def cmd_show(store: JobStore, args) -> int:
 
 
 def cmd_list(store: JobStore, args) -> int:
-    rows = [[job, m["vendor"], f"r{m['round']}", m["status"], "-" if m["secs"] is None else str(m["secs"]),
-             f"write:{m['writable']}" if m.get("mode", "read") == "write" else "-"]
-            for job, m in store.list()]
+    rows = [
+        [
+            job,
+            m["vendor"],
+            f"r{m['round']}",
+            m["status"],
+            "-" if m["secs"] is None else str(m["secs"]),
+            f"write:{m['writable']}" if m.get("mode", "read") == "write" else "-",
+        ]
+        for job, m in store.list()
+    ]
     if rows:
         widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
         for r in rows:
@@ -247,6 +270,7 @@ def _finish(display, store: JobStore, job: str, n: int) -> None:
 
 def cmd_run(store: JobStore, args) -> int:
     from xvendor.display import Display
+
     job, n = store.resolve(args.job), args.round
     meta = store.meta(job)
     # closing the pane sends SIGHUP: exit through run_round's cleanup so the vendor CLI is killed
@@ -262,11 +286,14 @@ def cmd_run(store: JobStore, args) -> int:
     display.header(meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"))
     rc = 0
     try:
-        runner.run_round(store, job, n, vendor_for(meta["vendor"]), display.event,
-                         popen_env=runner.scrub_env(os.environ))
+        runner.run_round(
+            store, job, n, vendor_for(meta["vendor"]), display.event, popen_env=runner.scrub_env(os.environ)
+        )
         if nested := store.meta(job).get("nested_git"):
-            display.warn(f"nested git repositories under {meta['writable']}: remove them before running any git "
-                         "command in the worktree: " + ", ".join(nested))
+            display.warn(
+                f"nested git repositories under {meta['writable']}: remove them before running any git "
+                "command in the worktree: " + ", ".join(nested)
+            )
         _finish(display, store, job, n)
     except Exception as e:  # runner already marked the job failed; keep the message visible
         print(f"xv: _run failed: {e}", file=sys.stderr)
@@ -280,6 +307,7 @@ def cmd_run(store: JobStore, args) -> int:
 
 def cmd_watch(store: JobStore, args) -> int:
     from xvendor.display import Display
+
     job = store.resolve(args.job)
     meta = store.meta(job)
     n = meta["round"]
@@ -316,8 +344,17 @@ def cmd_watch(store: JobStore, args) -> int:
     return 0
 
 
-COMMANDS = {"start": cmd_start, "ask": cmd_ask, "wait": cmd_wait, "show": cmd_show, "list": cmd_list,
-            "stop": cmd_stop, "close": cmd_close, "_run": cmd_run, "watch": cmd_watch}
+COMMANDS = {
+    "start": cmd_start,
+    "ask": cmd_ask,
+    "wait": cmd_wait,
+    "show": cmd_show,
+    "list": cmd_list,
+    "stop": cmd_stop,
+    "close": cmd_close,
+    "_run": cmd_run,
+    "watch": cmd_watch,
+}
 
 
 def main() -> None:
@@ -336,8 +373,11 @@ def main() -> None:
         print(f"xv: {e}", file=sys.stderr)
         if e.errno == errno.EROFS:
             # xv chained with another command (cd, ;, &&, |) stays inside Claude Code's Bash sandbox
-            print("xv: inside Claude Code's Bash sandbox, list xv in sandbox.excludedCommands and run it as "
-                  "a command of its own (no cd, ;, && or |): chained calls stay sandboxed", file=sys.stderr)
+            print(
+                "xv: inside Claude Code's Bash sandbox, list xv in sandbox.excludedCommands and run it as "
+                "a command of its own (no cd, ;, && or |): chained calls stay sandboxed",
+                file=sys.stderr,
+            )
         rc = 1
     except KeyboardInterrupt:
         rc = 130

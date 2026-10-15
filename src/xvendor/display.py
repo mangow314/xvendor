@@ -27,8 +27,9 @@ class Display:
         # soft_wrap: let the terminal wrap long lines instead of Rich inserting newlines
         self.console.print(text, markup=False, highlight=False, soft_wrap=True)
 
-    def header(self, vendor: str, job: str, n: int, timeout: int, mode: str = "read",
-               writable: str | None = None) -> None:
+    def header(
+        self, vendor: str, job: str, n: int, timeout: int, mode: str = "read", writable: str | None = None
+    ) -> None:
         line = Text()
         line.append(vendor, style=VENDOR_STYLE.get(vendor, ""))
         line.append(f" | {job[-4:]} | round {n} | limit {(timeout + 59) // 60} min")

@@ -30,12 +30,19 @@ def xv(data, fakes_dir, fixture_path, tmp_path):
     (agy / "builtin").mkdir()
     (agy / "settings.json").write_text("{}")
     base.pop("CODEX_HOME", None)
-    base.update(HOME=str(home), XV_DATA=str(data), PATH=f"{fakes_dir}{os.pathsep}{base.get('PATH', '')}",
-                XV_FAKE_FIXTURE=str(fixture_path("codex-done")))
+    base.update(
+        HOME=str(home),
+        XV_DATA=str(data),
+        PATH=f"{fakes_dir}{os.pathsep}{base.get('PATH', '')}",
+        XV_FAKE_FIXTURE=str(fixture_path("codex-done")),
+    )
 
     def run(*args, **env):
         e = {**base, **{k: str(v) for k, v in env.items()}}
-        return subprocess.run([sys.executable, "-m", "xvendor", *args], capture_output=True, text=True, env=e, cwd=tmp_path, timeout=60)
+        return subprocess.run(
+            [sys.executable, "-m", "xvendor", *args], capture_output=True, text=True, env=e, cwd=tmp_path, timeout=60
+        )
+
     return run
 
 
@@ -147,15 +154,18 @@ def test_ask_rejected_while_running(xv):
     xv("stop", job)
 
 
-@pytest.mark.parametrize("args, env", [
-    (["start", "codex", "-m", "x", "--no-pane", "--timeout", "a[$(id)0]"], {}),
-    (["close", "../../x"], {}),
-    (["start", "codex", "-m", "x", "--no-pane", "--profile", "../x"], {}),
-    (["list"], {"XV_DATA": "/tmp/a'b\"c"}),
-    (["show", "JOB", "x"], {}),
-    (["wait", "ffff"], {}),
-    (["ask", "JOB", "-m", "x", "--cwd", "/tmp"], {}),
-])
+@pytest.mark.parametrize(
+    "args, env",
+    [
+        (["start", "codex", "-m", "x", "--no-pane", "--timeout", "a[$(id)0]"], {}),
+        (["close", "../../x"], {}),
+        (["start", "codex", "-m", "x", "--no-pane", "--profile", "../x"], {}),
+        (["list"], {"XV_DATA": "/tmp/a'b\"c"}),
+        (["show", "JOB", "x"], {}),
+        (["wait", "ffff"], {}),
+        (["ask", "JOB", "-m", "x", "--cwd", "/tmp"], {}),
+    ],
+)
 def test_bad_input_rc2(xv, data, args, env):
     job = start(xv)
     xv("wait", job)
@@ -224,8 +234,9 @@ def test_ask_refuses_gitlinks_added_between_rounds(xv, data, tmp_path):
     work = make_worktree(tmp_path)
     job = xv("start", "codex", "-m", "q", "--no-pane", "--write", work).stdout.strip()
     assert xv("wait", job).returncode == 0
-    sha = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True,
-                         check=True).stdout.strip()
+    sha = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
     subprocess.run(["git", "-C", str(work), "update-index", "--add", "--cacheinfo", f"160000,{sha},sub"], check=True)
     assert xv("ask", job, "-m", "again").returncode == 0
     proc = xv("wait", job)
@@ -270,8 +281,9 @@ def test_start_write_refuses_git_dir(xv, tmp_path):
 
 
 def test_start_write_refuses_separate_git_dir(xv, tmp_path):
-    subprocess.run(["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")],
-                   check=True)
+    subprocess.run(
+        ["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")], check=True
+    )
     proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "sepwt")
     assert proc.returncode == 2
     assert "git worktree add" in proc.stderr
@@ -349,6 +361,7 @@ def test_erofs_hint(monkeypatch, capsys, tmp_path):
 
     def boom(store, args):
         raise OSError(errno.EROFS, "Read-only file system", str(tmp_path))
+
     monkeypatch.setitem(cli.COMMANDS, "list", boom)
     monkeypatch.setenv("XV_DATA", str(tmp_path))
     monkeypatch.setattr(sys, "argv", ["xv", "list"])

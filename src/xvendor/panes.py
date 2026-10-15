@@ -3,6 +3,7 @@
 Every tmux call passes a list, and the pane command is given as several arguments, so tmux execs it
 directly without `sh -c` (tmux(1), "shell-command [argument ...]", verified on tmux 3.7c).
 """
+
 import os
 import subprocess
 import sys
@@ -36,8 +37,14 @@ def launch(store: JobStore, job: str, n: int) -> None:
     meta = store.meta(job)
     cwd = meta["cwd"]
     if not in_tmux() or meta["no_pane"]:
-        subprocess.Popen(_run_cmd(job, n), cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(
+            _run_cmd(job, n),
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
         return
 
     # a new pane gets the tmux server's environment, not ours

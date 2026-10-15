@@ -10,8 +10,22 @@ import pytest
 
 from xvendor.jobs import JOB_ID_RE, JobError, JobStore
 
-META_KEYS = {"vendor", "cwd", "timeout", "no_pane", "profile", "session", "pane", "round", "status", "rc",
-             "secs", "round_started", "stop_requested", "created"}
+META_KEYS = {
+    "vendor",
+    "cwd",
+    "timeout",
+    "no_pane",
+    "profile",
+    "session",
+    "pane",
+    "round",
+    "status",
+    "rc",
+    "secs",
+    "round_started",
+    "stop_requested",
+    "created",
+}
 
 
 @pytest.fixture
@@ -25,6 +39,7 @@ def new_job(store, vendor="codex", request="hello"):
 
 # 1. data path validation
 
+
 @pytest.mark.parametrize("data", ["relative/dir", "/tmp/has space", "/tmp/a$b", "/tmp/a;b", "/tmp/中文"])
 def test_init_rejects_bad_data(data):
     with pytest.raises(JobError):
@@ -36,6 +51,7 @@ def test_init_accepts_abs_path(tmp_path):
 
 
 # 2. create
+
 
 def test_create_id_format(store):
     job = new_job(store, vendor="agy")
@@ -71,13 +87,19 @@ def test_create_keeps_existing_jobs_dir_mode(store, tmp_path):
 
 # 3. new meta
 
+
 def test_create_meta_fields(store):
     t0 = int(time.time())
     job = store.create("codex", "/work/dir", 900, True, "local", "q")
     m = store.meta(job)
     assert set(m) >= META_KEYS
-    assert (m["vendor"], m["cwd"], m["timeout"], m["no_pane"], m["profile"]) == ("codex", "/work/dir", 900, True,
-                                                                                 "local")
+    assert (m["vendor"], m["cwd"], m["timeout"], m["no_pane"], m["profile"]) == (
+        "codex",
+        "/work/dir",
+        900,
+        True,
+        "local",
+    )
     assert m["session"] is None and m["pane"] is None and m["rc"] is None and m["secs"] is None
     assert m["round"] == 1
     assert m["status"] == "running"
@@ -93,6 +115,7 @@ def test_meta_matches_file(store, tmp_path):
 
 
 # 4. update
+
 
 def test_update_merges_fields(store):
     job = new_job(store)
@@ -125,25 +148,31 @@ BAD_IDS = ["../x", "", "20261010T164006Z-codex-07b0/..", "20261010T164006Z-gpt-0
 
 
 @pytest.mark.parametrize("bad", BAD_IDS)
-@pytest.mark.parametrize("call", [
-    lambda s, j: s.meta(j),
-    lambda s, j: s.update(j, status="done"),
-    lambda s, j: s.new_round(j, "x"),
-    lambda s, j: s.round_dir(j, 1),
-])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda s, j: s.meta(j),
+        lambda s, j: s.update(j, status="done"),
+        lambda s, j: s.new_round(j, "x"),
+        lambda s, j: s.round_dir(j, 1),
+    ],
+)
 def test_bad_job_id_rejected(store, bad, call):
     new_job(store)
     with pytest.raises(JobError):
         call(store, bad)
 
 
-@pytest.mark.parametrize("call", [
-    lambda s, j: s.meta(j),
-    lambda s, j: s.update(j, status="done"),
-    lambda s, j: s.new_round(j, "x"),
-    lambda s, j: s.round_dir(j, 1),
-    lambda s, j: s.resolve(j),
-])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda s, j: s.meta(j),
+        lambda s, j: s.update(j, status="done"),
+        lambda s, j: s.new_round(j, "x"),
+        lambda s, j: s.round_dir(j, 1),
+        lambda s, j: s.resolve(j),
+    ],
+)
 def test_missing_job_rejected(store, call):
     new_job(store)
     with pytest.raises(JobError):
@@ -151,6 +180,7 @@ def test_missing_job_rejected(store, call):
 
 
 # 6. new_round
+
 
 def test_new_round(store, tmp_path):
     job = new_job(store)
@@ -170,6 +200,7 @@ def test_new_round(store, tmp_path):
 
 # 7. round_dir
 
+
 def test_round_dir(store, tmp_path):
     job = new_job(store)
     assert store.round_dir(job, 1) == tmp_path / "jobs" / job / "round-1"
@@ -183,6 +214,7 @@ def test_round_dir_rejects_non_positive(store, n):
 
 
 # 8. resolve
+
 
 def test_resolve_full_id(store):
     job = new_job(store)
@@ -214,6 +246,7 @@ def test_resolve_ambiguous(store, tmp_path):
 
 # list
 
+
 def test_list_sorted_by_id(store, tmp_path):
     a = new_job(store)
     early = "20200101T000000Z-codex-0000"
@@ -224,6 +257,7 @@ def test_list_sorted_by_id(store, tmp_path):
 
 
 # --write fields
+
 
 def test_create_write_meta_and_running_writable(store):
     job = store.create("codex", "/w", 600, False, None, "q", "/w")

@@ -5,15 +5,22 @@ import pytest
 from xvendor.events import Event
 from xvendor.vendors.codex import CodexVendor
 
-FLAGGED = ("This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing "
-           "your request. If you’re doing authorized security work that requires more cyber permissive "
-           "safeguards, apply for Daybreak access via "
-           "https://platform.openai.com/settings/organization/status-and-access before retrying.")
+FLAGGED = (
+    "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing "
+    "your request. If you’re doing authorized security work that requires more cyber permissive "
+    "safeguards, apply for Daybreak access via "
+    "https://platform.openai.com/settings/organization/status-and-access before retrying."
+)
 
 
-ROOTS = ["-c", "sandbox_workspace_write.exclude_slash_tmp=true",
-         "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-         "-c", "sandbox_workspace_write.writable_roots=[]"]
+ROOTS = [
+    "-c",
+    "sandbox_workspace_write.exclude_slash_tmp=true",
+    "-c",
+    "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+    "-c",
+    "sandbox_workspace_write.writable_roots=[]",
+]
 
 
 @pytest.fixture
@@ -27,34 +34,78 @@ def test_name(v):
 
 # build
 
+
 def test_build_round1(v):
-    assert v.build(1, None, "hi", None) == [
-        "codex", "exec", "-s", "read-only", "--skip-git-repo-check", "--json", "hi"]
+    assert v.build(1, None, "hi", None) == ["codex", "exec", "-s", "read-only", "--skip-git-repo-check", "--json", "hi"]
 
 
 def test_build_round1_profile(v):
     assert v.build(1, None, "hi", "local") == [
-        "codex", "-p", "local", "exec", "-s", "read-only", "--skip-git-repo-check", "--json", "hi"]
+        "codex",
+        "-p",
+        "local",
+        "exec",
+        "-s",
+        "read-only",
+        "--skip-git-repo-check",
+        "--json",
+        "hi",
+    ]
 
 
 def test_build_resume(v):
     assert v.build(2, "sid-1", "again", None) == [
-        "codex", "exec", "resume", "-c", 'sandbox_mode="read-only"', "--skip-git-repo-check", "--json",
-        "sid-1", "again"]
+        "codex",
+        "exec",
+        "resume",
+        "-c",
+        'sandbox_mode="read-only"',
+        "--skip-git-repo-check",
+        "--json",
+        "sid-1",
+        "again",
+    ]
 
 
 def test_build_resume_profile(v):
     assert v.build(3, "sid-1", "again", "local") == [
-        "codex", "-p", "local", "exec", "resume", "-c", 'sandbox_mode="read-only"', "--skip-git-repo-check",
-        "--json", "sid-1", "again"]
+        "codex",
+        "-p",
+        "local",
+        "exec",
+        "resume",
+        "-c",
+        'sandbox_mode="read-only"',
+        "--skip-git-repo-check",
+        "--json",
+        "sid-1",
+        "again",
+    ]
 
 
 def test_build_write_mode(v):
     assert v.build(1, None, "hi", None, mode="write") == [
-        "codex", "exec", "-s", "workspace-write", *ROOTS, "--skip-git-repo-check", "--json", "hi"]
+        "codex",
+        "exec",
+        "-s",
+        "workspace-write",
+        *ROOTS,
+        "--skip-git-repo-check",
+        "--json",
+        "hi",
+    ]
     assert v.build(2, "sid-1", "again", None, mode="write") == [
-        "codex", "exec", "resume", "-c", 'sandbox_mode="workspace-write"', *ROOTS, "--skip-git-repo-check",
-        "--json", "sid-1", "again"]
+        "codex",
+        "exec",
+        "resume",
+        "-c",
+        'sandbox_mode="workspace-write"',
+        *ROOTS,
+        "--skip-git-repo-check",
+        "--json",
+        "sid-1",
+        "again",
+    ]
     assert v.build(1, None, "hi", None, mode="read") == v.build(1, None, "hi", None)
 
 
@@ -67,6 +118,7 @@ def test_write_mode_codex_sandbox_roots(v):
 
 
 # parse
+
 
 def line(obj):
     return json.dumps(obj, ensure_ascii=False)
@@ -81,21 +133,27 @@ def test_parse_non_json(v, raw):
     assert v.parse(raw) is None
 
 
-@pytest.mark.parametrize("obj", [
-    {"type": "thread.started", "thread_id": "t"},
-    {"type": "turn.started"},
-    {"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}},
-    {"type": "item.started", "item": {"type": "web_search"}},
-])
+@pytest.mark.parametrize(
+    "obj",
+    [
+        {"type": "thread.started", "thread_id": "t"},
+        {"type": "turn.started"},
+        {"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}},
+        {"type": "item.started", "item": {"type": "web_search"}},
+    ],
+)
 def test_parse_unknown_events(v, obj):
     assert v.parse(line(obj)) is None
 
 
-@pytest.mark.parametrize("command, expected", [
-    ('/bin/bash -lc "sed -n \'1,240p\' a.rs"', "sed -n '1,240p' a.rs"),
-    ("/bin/sh -lc 'ls -la'", "ls -la"),
-    ("rg foo", "rg foo"),
-])
+@pytest.mark.parametrize(
+    "command, expected",
+    [
+        ("/bin/bash -lc \"sed -n '1,240p' a.rs\"", "sed -n '1,240p' a.rs"),
+        ("/bin/sh -lc 'ls -la'", "ls -la"),
+        ("rg foo", "rg foo"),
+    ],
+)
 def test_parse_command(v, command, expected):
     assert v.parse(started(command)) == Event("action", expected)
 
@@ -125,6 +183,7 @@ def test_parse_turn_completed(v):
 
 # fixtures
 
+
 def parsed(v, lines):
     return [e for e in map(v.parse, lines) if e is not None]
 
@@ -151,6 +210,7 @@ def test_parse_fixture_agy_done_is_all_none(v, fixture_lines):
 
 
 # result
+
 
 def test_result_codex_done(v, fixture_lines):
     lines = fixture_lines("codex-done")

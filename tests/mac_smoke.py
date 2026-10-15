@@ -8,6 +8,7 @@ Part 2 runs real xv rounds (agy and codex, one follow-up each). Prints PASS/FAIL
 Nothing on the host is changed: write probes open existing files for append without writing, and files the
 probes create live in the round's tmpdir or are removed again.
 """
+
 import json
 import os
 import shutil
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from xvendor import isolation
 
-PROBE = r'''
+PROBE = r"""
 import json, os, socket, subprocess, sys
 spec = json.loads(sys.argv[1])
 out = {}
@@ -67,7 +68,7 @@ except OSError as e:
 out["home"] = os.environ.get("HOME")
 out["tmux"] = os.environ.get("TMUX")
 print(json.dumps(out))
-'''
+"""
 
 results: list[tuple[bool, str]] = []
 
@@ -121,27 +122,46 @@ def part1() -> None:
         progs = [x for x in isolation.EXEC_DENY if os.path.exists(x)]
         for x in sorted(set(isolation.EXEC_DENY) - set(progs)):
             print(f"INFO  {x} does not exist on this Mac (blocklist entry has no effect)")
-        got = probe("agy", {
-            "append": {"write_real_settings": str(agy / "settings.json"),
-                       "write_real_agentapi": str(agy / "bin" / "agentapi")},
-            "create": {"create_outside_home": str(outside), "create_in_real_bin": str(agy / "bin" / "xv-smoke"),
-                       "create_in_real_builtin": str(agy / "builtin" / "xv-smoke"),
-                       "create_in_fake_bin": str(fake_bin / "xv-smoke"),
-                       "create_in_conversations": str(agy / "conversations" / f"xv-smoke-{os.getpid()}"),
-                       "create_in_tmpdir": str(tmp / "x")},
-            "read": secrets, "socket": sockets(), "exec": progs}, tmp)
+        got = probe(
+            "agy",
+            {
+                "append": {
+                    "write_real_settings": str(agy / "settings.json"),
+                    "write_real_agentapi": str(agy / "bin" / "agentapi"),
+                },
+                "create": {
+                    "create_outside_home": str(outside),
+                    "create_in_real_bin": str(agy / "bin" / "xv-smoke"),
+                    "create_in_real_builtin": str(agy / "builtin" / "xv-smoke"),
+                    "create_in_fake_bin": str(fake_bin / "xv-smoke"),
+                    "create_in_conversations": str(agy / "conversations" / f"xv-smoke-{os.getpid()}"),
+                    "create_in_tmpdir": str(tmp / "x"),
+                },
+                "read": secrets,
+                "socket": sockets(),
+                "exec": progs,
+            },
+            tmp,
+        )
         if got:
             report(got["home"] == str(tmp / "home"), "agy: HOME is the fake home", got["home"])
             report(got["tmux"] is None, "agy: TMUX unset")
-        for name in ("write_real_settings", "write_real_agentapi", "create_outside_home", "create_in_real_bin",
-                     "create_in_real_builtin", *secrets, *sockets(), "signal_parent",
-                     *(f"exec_{os.path.basename(x)}" for x in progs)):
+        for name in (
+            "write_real_settings",
+            "write_real_agentapi",
+            "create_outside_home",
+            "create_in_real_bin",
+            "create_in_real_builtin",
+            *secrets,
+            *sockets(),
+            "signal_parent",
+            *(f"exec_{os.path.basename(x)}" for x in progs),
+        ):
             expect("agy", got, name, False)
         for name in ("create_in_fake_bin", "create_in_conversations", "create_in_tmpdir", "dns"):
             expect("agy", got, name, True)
         if got:  # informational: no pid namespace on macOS (known gap)
             print(f"INFO  agy: ps sees processes outside the sandbox: {got['ps_outside']}")
-
 
 
 def xv(*args: str, timeout: int = 600) -> subprocess.CompletedProcess:
@@ -153,9 +173,21 @@ def part2() -> None:
     before = agentapi.stat().st_mtime if agentapi.exists() else None
     cwd = tempfile.mkdtemp(prefix="xv-smoke-cwd-")
     for vendor in ("agy", "codex"):
-        start = subprocess.run([sys.executable, "-m", "xvendor", "start", vendor, "--no-pane", "-m",
-                                "Run the shell command `echo xv-smoke-hi` and reply with its output only."],
-                               capture_output=True, text=True, cwd=cwd)
+        start = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "xvendor",
+                "start",
+                vendor,
+                "--no-pane",
+                "-m",
+                "Run the shell command `echo xv-smoke-hi` and reply with its output only.",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+        )
         if start.returncode != 0:
             report(False, f"{vendor}: xv start", start.stderr.strip()[-400:])
             continue

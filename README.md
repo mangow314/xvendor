@@ -283,7 +283,10 @@ only for your own repositories.
 - **Same rules for files, sockets and processes.** Writes are denied
   everywhere except the state directory, the per-round temp directory and,
   in write mode, `DIR`; `settings.json`, `builtin`, `bin` and `DIR/.git` are
-  denied again inside them. The credential paths above are denied for
+  denied again inside them, a symlinked one both as the link and where it
+  points. The directories that hold those entries or a hidden file cannot be
+  renamed, since Seatbelt matches paths and a renamed directory would carry
+  its entries out from under their rules. The credential paths above are denied for
   reading and writing (`Operation not permitted` instead of an empty file).
   Unix sockets are denied except DNS (`mDNSResponder`) and sockets inside
   the writable directories, which covers docker, ssh-agent and tmux. Signals

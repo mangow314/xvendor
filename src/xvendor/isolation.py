@@ -471,13 +471,29 @@ def _seatbelt(
     if fake_home:
         env.append(f"HOME={_fake_home(tmpdir, state)}")
 
+    allow = [Path(os.path.realpath(p)) for p in allow]
+    # A symlinked entry is protected both where it points and as the link itself, or the vendor could replace the
+    # link with a file of its own (measured on macOS 26.5).
+    named = [Path(os.path.realpath(p.parent)) / p.name for p in protect]
+    protect = list(dict.fromkeys([*named, *(Path(os.path.realpath(p)) for p in protect)]))
+    # Seatbelt matches paths, not mounts: renaming a writable dir that holds a protected or hidden entry moves the
+    # entry out from under its rule (measured: rename the state dir out, edit, rename back). Pin those dirs.
+    pins = {
+        a
+        for root in allow
+        for p in [*named, *hide]
+        if p != root and p.is_relative_to(root)
+        for a in [p.parent, *p.parent.parents]
+        if a.is_relative_to(root)
+    }
+
     params: list[str] = []
 
-    def refs(key: str, paths, form: str = "{}") -> str:
+    def refs(key: str, paths, form: str = "{}", match: str = "subpath") -> str:
         out = []
         for i, p in enumerate(paths):
-            params.extend(["-D", f"{key}{i}={os.path.realpath(p)}"])
-            out.append(form.format(f'(subpath (param "{key}{i}"))'))
+            params.extend(["-D", f"{key}{i}={p}"])
+            out.append(form.format(f'({match} (param "{key}{i}"))'))
         return " ".join(out)
 
     # Later rules win: writes are denied, then allowed under the writable dirs, then denied again for the
@@ -490,6 +506,8 @@ def _seatbelt(
     ]
     if protect:
         rules.append(f"(deny file-write* {refs('R', protect)})")
+    if pins:
+        rules.append(f"(deny file-write* {refs('P', sorted(pins), match='literal')})")
     if hide:
         rules.append(f"(deny file-read* file-write* {refs('S', hide)})")
     # A read-only file system does not stop connect() to a unix socket (docker, tmux, ssh-agent): deny them all

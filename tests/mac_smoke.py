@@ -4,7 +4,9 @@
 
 Part 1 runs a probe under the exact wrap() line for agy and checks what it can and cannot touch (codex keeps
 only its own Seatbelt sandbox on macOS, so there is no xv line to probe).
-Part 2 runs real xv rounds (agy and codex, one follow-up each). Prints PASS/FAIL per check; exit 1 on any FAIL.
+Part 2 runs real xv rounds (agy and codex, one follow-up each).
+Part 3 tries path tricks against the write-mode layout in a throwaway HOME. Prints PASS/FAIL per check; exit 1 on
+any FAIL.
 Nothing on the host is changed: write probes open existing files for append without writing, and files the
 probes create live in the round's tmpdir or are removed again.
 """
@@ -214,6 +216,96 @@ def part2() -> None:
     report(before == after, "agy: host bin/agentapi unchanged", f"{before} -> {after}")
 
 
+ESCAPES = r"""
+import json, os, sys
+out = {}
+def run(name, fn):
+    try:
+        fn()
+        out[name] = "ok"
+    except Exception as e:
+        out[name] = f"{type(e).__name__}: {e}"
+def append(p): os.close(os.open(p, os.O_WRONLY | os.O_APPEND))
+def create(p): os.close(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL)); os.remove(p)
+def rename_back(a, b, then=None):
+    os.rename(a, b)
+    try:
+        if then: then(b)
+    finally:
+        os.rename(b, a)
+def link_write(src, dst):
+    os.link(src, dst)
+    try: append(dst)
+    finally: os.remove(dst)
+def replace_link(p):
+    target = os.readlink(p)
+    os.remove(p)
+    try: open(p, "w").close(); os.remove(p)
+    finally: os.symlink(target, p)
+def rename_inside(d):
+    a, b = os.path.join(d, "xv-a"), os.path.join(d, "xv-b")
+    open(a, "w").close(); os.rename(a, b); os.remove(b)
+s = json.loads(sys.argv[1])
+S, WT, T, H = s["S"], s["WT"], os.environ["TMPDIR"], os.environ["HOME"]
+run("rename_state_dir_out", lambda: rename_back(S, T + "/s", lambda b: append(b + "/builtin/skill.md")))
+run("rename_builtin", lambda: rename_back(S + "/builtin", S + "/conversations/b"))
+run("hard_link_builtin_file", lambda: link_write(S + "/builtin/skill.md", S + "/conversations/h"))
+run("hard_link_settings_target", lambda: link_write(s["target"], S + "/conversations/h2"))
+run("replace_symlinked_settings", lambda: replace_link(S + "/settings.json"))
+run("write_settings_via_fake_home", lambda: append(H + "/.gemini/antigravity-cli/settings.json"))
+run("rename_worktree_out_read_env", lambda: rename_back(WT, T + "/w", lambda b: open(b + "/.env").read()))
+run("rename_subdir_out_read_env", lambda: rename_back(WT + "/sub", T + "/u", lambda b: open(b + "/.env").read()))
+run("rename_worktree_git_pointer", lambda: rename_back(WT + "/.git", WT + "/g"))
+run("hard_link_worktree_git", lambda: link_write(WT + "/.git", WT + "/g2"))
+run("create_in_conversations", lambda: create(S + "/conversations/n"))
+run("create_state_entry", lambda: create(S + "/newtop"))
+run("create_in_worktree", lambda: create(WT + "/n"))
+run("append_worktree_file", lambda: append(WT + "/f.txt"))
+run("rename_file_in_worktree", lambda: rename_inside(WT))
+run("mkdir_rmdir_in_worktree", lambda: (os.mkdir(WT + "/d"), os.rmdir(WT + "/d")))
+print(json.dumps(out))
+"""
+
+
+def part3() -> None:
+    """Path tricks against the write-mode layout (rename a dir out from under its rule, hard links, replacing a
+    symlinked entry), in a throwaway HOME with its own state dir and worktree: an escape here touches nothing real."""
+    world = Path(tempfile.mkdtemp(prefix="xv-smoke-world-")).resolve()
+    os.environ["HOME"] = str(world)  # isolation reads Path.home(); parts 1 and 2 are done with the real one
+    state = world / ".gemini" / "antigravity-cli"
+    for d in ("builtin", "bin", "conversations"):
+        (state / d).mkdir(parents=True)
+    (state / "builtin" / "skill.md").write_text("x")
+    (state / "bin" / "agentapi").write_text("x")
+    target = world / "dotfiles" / "settings.json"  # a dotfile manager's symlinked config
+    target.parent.mkdir()
+    target.write_text("{}")
+    (state / "settings.json").symlink_to(target)
+    main, wt = world / "projects" / "main", world / "projects" / "wt"
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@x"]
+    subprocess.run([*git, "init", "-q", str(main)], check=True)
+    (main / "f.txt").write_text("x")
+    subprocess.run([*git, "-C", str(main), "add", "f.txt"], check=True)
+    subprocess.run([*git, "-C", str(main), "commit", "-qm", "x"], check=True)
+    subprocess.run([*git, "-C", str(main), "worktree", "add", "-q", str(wt)], check=True)
+    (wt / ".env").write_text("SECRET=1")
+    (wt / "sub").mkdir()
+    (wt / "sub" / ".env").write_text("SECRET=1")
+    tmp = Path(tempfile.mkdtemp(prefix="xv-smoke-"))
+    spec = json.dumps({"S": str(state), "WT": str(wt), "target": str(target)})
+    argv = isolation.wrap("agy", [sys.executable, "-I", "-c", ESCAPES, spec], tmp, writable=wt)
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        report(False, "agy write mode: probe ran", f"rc={r.returncode} {r.stderr.strip()[-300:]}")
+        return
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    for name in got:
+        allowed = name.startswith(("create_", "append_", "mkdir_", "rename_file_"))
+        expect("agy write mode", got, name, allowed)
+    shutil.rmtree(world, ignore_errors=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     if sys.platform != "darwin":
         print("mac_smoke.py runs on macOS only", file=sys.stderr)
@@ -221,6 +313,7 @@ def main() -> int:
     print(f"macOS {subprocess.run(['sw_vers', '-productVersion'], capture_output=True, text=True).stdout.strip()}")
     part1()
     part2()
+    part3()
     failed = [w for ok, w in results if not ok]
     print(f"\n{len(results) - len(failed)} passed, {len(failed)} failed" + (f" ({time.strftime('%F %T')})"))
     return 1 if failed else 0

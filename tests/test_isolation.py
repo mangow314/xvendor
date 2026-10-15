@@ -574,6 +574,36 @@ def test_seatbelt_write_dir(tmp_path, monkeypatch):
     assert not any(Path(p) == gitdir or gitdir in Path(p).parents for p in params)
 
 
+def test_seatbelt_symlinked_entry_protects_link_and_target(tmp_path, monkeypatch):
+    on_darwin(tmp_path, monkeypatch)
+    _, state = fake_agy_home(tmp_path, monkeypatch)
+    target = tmp_path / "dotfiles" / "settings.json"
+    target.parent.mkdir()
+    target.write_text("{}")
+    (state / "settings.json").unlink()
+    (state / "settings.json").symlink_to(target)
+    params = seatbelt_params(wrap("agy", ["agy"], tmp_path / "t"))
+    assert params[str(state / "settings.json")][0].startswith("R")
+    assert params[str(target)][0].startswith("R")
+
+
+@needs_git
+def test_seatbelt_pins_dirs_holding_protected_entries(tmp_path, monkeypatch):
+    home, state = fake_agy_home(tmp_path, monkeypatch)
+    sbx = on_darwin(tmp_path, monkeypatch)
+    wt, _ = make_worktree(home / "projects")
+    (wt / "sub").mkdir()
+    (wt / "sub" / ".env").write_text("SECRET=1")
+    argv = wrap("agy", ["agy"], tmp_path / "t", wt)
+    assert argv[0] == sbx
+    params = seatbelt_params(argv)
+    pinned = {p for p, keys in params.items() if any(k.startswith("P") for k in keys)}
+    # the state dir and DIR hold protected entries, DIR/sub a hidden one; nothing above them or under tmp
+    assert pinned == {str(state), str(wt), str(wt / "sub")}
+    assert params[str(wt / "sub" / ".env")][0].startswith("S")
+    assert '(deny file-write* (literal (param "P0"))' in argv[2]
+
+
 @needs_git
 def test_write_argv_gitdir_readonly(tmp_path, monkeypatch):
     fake_codex_home(tmp_path, monkeypatch)

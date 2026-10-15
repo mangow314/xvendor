@@ -3,7 +3,6 @@ import errno
 import os
 import re
 import signal
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -211,7 +210,7 @@ def cmd_list(store: JobStore, args) -> int:
     if rows:
         widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
         for r in rows:
-            print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
+            print("  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip())
     return 0
 
 
@@ -272,7 +271,7 @@ def cmd_run(store: JobStore, args) -> int:
             display.warn(f"nested git repositories under {meta['writable']}: remove them before running any git "
                          "command in the worktree: " + ", ".join(nested))
         _finish(display, store, job, n)
-    except Exception as e:  # runner already marked the job failed; keep the message visible
+    except Exception as e:  # noqa: BLE001 - pane must show any error; runner already marked the job failed
         print(f"xv: _run failed: {e}", file=sys.stderr)
         rc = 1
     if os.environ.get("XV_PANE") == "1":

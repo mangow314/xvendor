@@ -328,7 +328,7 @@ def test_watch_finished_round(xv):
     proc = xv("watch", job)
     assert proc.returncode == 0
     assert "run    sed -n '1,240p' src/app/paths.py" in proc.stdout
-    assert f"done | " in proc.stdout and f"xv show {job[-4:]}" in proc.stdout
+    assert "done | " in proc.stdout and f"xv show {job[-4:]}" in proc.stdout
 
 
 def test_run_prints_carry_first(xv, data):

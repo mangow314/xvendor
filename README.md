@@ -200,6 +200,11 @@ bubblewrap (`bwrap`) layout:
 - **Own pid namespace.** bwrap runs the vendor with `--unshare-pid`: when a round ends, background
   processes the vendor left behind (even ones started with `setsid`) are killed with it, and host
   processes are invisible to the vendor, so `/proc/<pid>/root` of a host process cannot be used.
+  Inside a Docker container that masks parts of `/proc`, the kernel refuses the fresh `/proc` this
+  needs and `xv start` stops with the bwrap error. Either run the container with
+  `--security-opt systempaths=unconfined`, or set `XV_NO_PIDNS=1` to run read-only jobs without a
+  pid namespace: leftover background processes then outlive the round, host processes are visible
+  under `/proc`, and `--write` is refused.
 - **`/run` and X11 hidden.** `/run`, `/tmp/.X11-unix` and the default tmux
   socket directory (`$TMUX_TMPDIR` or `/tmp`, `tmux-<uid>`) are covered by
   empty in-memory folders. A read-only mount does not stop `connect()` to a

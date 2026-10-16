@@ -29,7 +29,7 @@ def codex_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     if sys.platform != "linux" or shutil.which("bwrap") is None:
-        monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
+        monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None, pidns=True: list(argv))
 
 
 @pytest.fixture
@@ -82,11 +82,21 @@ def test_codex_done(store, tmp_path, env, fixture_path):
 
 def test_argv_reaches_cli(store, tmp_path, env, fixture_path, monkeypatch):
     # the fake writes argv.json outside the sandbox's writable dirs, so check argv without bwrap
-    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None, pidns=True: list(argv))
     job = new_job(store, tmp_path)
     out = tmp_path / "argv.json"
     runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done"), XV_FAKE_ARGV_OUT=out))
     assert json.loads(out.read_text()) == CodexVendor().build(1, None, "question", None)[1:]
+
+
+def test_job_without_pidns_reaches_wrap(store, tmp_path, env, fixture_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        runner, "wrap", lambda vendor, argv, tmpdir, writable=None, pidns=True: seen.append(pidns) or list(argv)
+    )
+    job = store.create("codex", str(tmp_path), 30, True, None, "question", pidns=False)
+    runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-done")))
+    assert seen == [False]
 
 
 def test_background_process_dies_with_round(store, tmp_path, env, fixture_path, monkeypatch):
@@ -94,7 +104,7 @@ def test_background_process_dies_with_round(store, tmp_path, env, fixture_path, 
     monkeypatch.setattr(
         runner,
         "wrap",
-        lambda vendor, argv, tmpdir, writable=None: [
+        lambda vendor, argv, tmpdir, writable=None, pidns=True: [
             "sh",
             "-c",
             f'sleep 60 >/dev/null 2>&1 & echo $! > {pidfile}; exec "$@"',
@@ -250,7 +260,7 @@ def test_scrub_env_drops_git_config_family():
 
 
 def test_nested_git_written_on_failed_round(store, tmp_path, env, fixture_path, monkeypatch):
-    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None: list(argv))
+    monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None, pidns=True: list(argv))
     work = tmp_path / "wt"
     subprocess.run(["git", "init", "-q", str(work)], check=True)
     (work / "sub" / ".git").mkdir(parents=True)

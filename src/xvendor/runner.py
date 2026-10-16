@@ -65,7 +65,7 @@ def run_round(
             built = vendor.build(n, meta["session"], prompt, meta["profile"], meta.get("mode", "read"))
             if meta.get("mode") == "write" and has_gitlinks(Path(meta["writable"])):
                 raise RuntimeError(f"{meta['writable']} now has submodule entries (gitlinks); refusing the write round")
-            argv = wrap(vendor.name, built, tmpdir, writable)
+            argv = wrap(vendor.name, built, tmpdir, writable, pidns=meta.get("pidns", True))
         except (UnsupportedPlatform, ValueError, RuntimeError) as e:
             msg = str(e)
             (rd / "stderr.log").write_text(msg + "\n", encoding="utf-8")

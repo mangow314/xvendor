@@ -45,6 +45,7 @@ class JobStore:
         profile: str | None,
         request: str,
         writable: str | None = None,
+        pidns: bool = True,
     ) -> str:
         if not self.jobs.exists():
             self.jobs.mkdir(parents=True)
@@ -64,6 +65,7 @@ class JobStore:
                 "profile": profile,
                 "mode": "write" if writable else "read",
                 "writable": writable,
+                "pidns": pidns,
                 "session": None,
                 "pane": None,
                 "round": 1,

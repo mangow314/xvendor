@@ -137,6 +137,21 @@ def cmd_start(store: JobStore, args) -> int:
         isolation.check(args.vendor)
     except isolation.UnsupportedPlatform as e:
         raise Fail(str(e)) from None
+    pidns = os.environ.get("XV_NO_PIDNS") != "1"
+    if not pidns and writable is not None:
+        raise Fail(
+            "--write needs a pid namespace (unset XV_NO_PIDNS): background processes the vendor leaves behind "
+            "could keep writing DIR after the round"
+        )
+    if pidns and sys.platform == "linux" and (err := isolation.pidns_error()):
+        raise Fail(
+            f"bwrap cannot give {args.vendor} its own pid namespace here: {err}. A Docker container that masks parts "
+            "of /proc does this; run it with --security-opt systempaths=unconfined, or set XV_NO_PIDNS=1 for "
+            "read-only jobs without one (leftover background processes outlive the round, host processes show "
+            "under /proc; --write is refused)"
+        )
+    if not pidns:
+        print("xv: XV_NO_PIDNS=1: running without a pid namespace", file=sys.stderr)
     if args.profile is not None:
         if args.vendor != "codex":
             raise Fail("--profile is only supported for codex")
@@ -155,6 +170,7 @@ def cmd_start(store: JobStore, args) -> int:
         args.profile,
         req,
         str(writable) if writable else None,
+        pidns,
     )
     panes.launch(store, job, 1)
     if args.no_pane or not panes.in_tmux():

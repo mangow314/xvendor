@@ -2,6 +2,7 @@
 # writable own state dir with config-like entries re-protected, writable tmpdir, secrets and sockets hidden.
 # codex's own inner sandbox (-s read-only) stays as a second layer. --unshare-pid gives the vendor its own pid
 # namespace: leftover background processes die with bwrap and host pids (/proc/<pid>/root) are invisible.
+# XV_NO_PIDNS=1 (read-only jobs only) drops it where a fresh /proc cannot be mounted, e.g. a Docker container.
 # On macOS agy gets the same layout as a Seatbelt profile run by sandbox-exec (_seatbelt). codex runs unwrapped off
 # Linux: on macOS its own -s read-only is itself a Seatbelt sandbox, and Seatbelt cannot be applied twice.
 import os
@@ -113,6 +114,19 @@ def check(vendor: str) -> None:
         raise UnsupportedPlatform(f"{vendor} needs bubblewrap (bwrap) for read-only isolation; bwrap not found")
 
 
+def pidns_error() -> str | None:
+    """bwrap's error when it cannot run with its own pid namespace here, else None. Docker masks parts of /proc
+    (/proc/kcore, /proc/keys), and the kernel then refuses the fresh /proc mount a new pid namespace needs."""
+    probe = subprocess.run(
+        ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "true"],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        return None
+    return probe.stderr.strip() or f"rc={probe.returncode}"
+
+
 def _secret_items(home: Path, own_state: Path | None) -> list[tuple[Path, list[str]]]:
     """(path, bwrap args) masking SECRET_PATHS / SECRET_GLOBS under home, skipping anything inside own_state."""
     out = []
@@ -167,9 +181,9 @@ def state_dir(vendor: str) -> Path:
     return Path.home() / ".gemini" / "antigravity-cli"
 
 
-def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = None) -> list[str]:
+def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = None, pidns: bool = True) -> list[str]:
     """Return argv wrapped so the vendor CLI cannot write outside its own state dirs (spec R3),
-    plus writable when given (--write mode)."""
+    plus writable when given (--write mode). pidns=False leaves out bwrap's --unshare-pid."""
     check(vendor)
     if vendor == "codex":
         if sys.platform != "linux":
@@ -178,7 +192,7 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
         state = state_dir("codex")
         protect = list(CODEX_STATE_READONLY)
         extra = sorted(p.name for p in state.glob("*.config.toml")) if state.is_dir() else []
-        return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state, writable)
+        return _bwrap("codex", argv, tmpdir, state, protect + extra, CODEX_STATE_REQUIRED, state, writable, pidns=pidns)
     state = state_dir("agy")
     if sys.platform == "darwin":
         return _seatbelt(
@@ -201,6 +215,7 @@ def wrap(vendor: str, argv: list[str], tmpdir: Path, writable: Path | None = Non
         state,
         writable,
         shadow_entries=STATE_SHADOW,
+        pidns=pidns,
     )
 
 
@@ -324,6 +339,7 @@ def _bwrap(
     own_state: Path,
     writable: Path | None = None,
     shadow_entries=(),
+    pidns: bool = True,
 ) -> list[str]:
     """Shared bwrap line: read-only root, hidden sockets and secrets, writable state dir with its
     config-like entries re-protected, writable tmpdir. Layout measured for agy 2026-10-12."""
@@ -412,7 +428,7 @@ def _bwrap(
         "TMUX",
         "--unsetenv",
         "TMUX_PANE",
-        "--unshare-pid",
+        *(["--unshare-pid"] if pidns else []),
         "--die-with-parent",
         "--",
         *argv,

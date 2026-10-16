@@ -56,6 +56,12 @@ def test_codex_argv_structure(tmp_path, monkeypatch):
     assert argv[-4:] == ["--", "codex", "exec", "hi"]
 
 
+def test_codex_without_pidns_drops_unshare_pid(tmp_path, monkeypatch):
+    fake_codex_home(tmp_path, monkeypatch)
+    assert "--unshare-pid" in wrap("codex", ["codex"], tmp_path / "t")
+    assert "--unshare-pid" not in wrap("codex", ["codex"], tmp_path / "t", pidns=False)
+
+
 def test_codex_refused_when_required_missing(tmp_path, monkeypatch):
     home, state = fake_codex_home(tmp_path, monkeypatch)
     (state / "hooks").rmdir()

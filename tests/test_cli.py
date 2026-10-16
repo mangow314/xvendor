@@ -89,6 +89,36 @@ def test_start_wait_agy(xv, fixture_path):
     assert xv("show", job).stdout == "layout test 2\n\n"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="bwrap probe is Linux-only")
+def test_start_refuses_when_pidns_unavailable(xv, data, tmp_path):
+    # stands in for bwrap inside a Docker container that masks parts of /proc
+    fake = tmp_path / "dockerbin"
+    fake.mkdir()
+    (fake / "bwrap").write_text(
+        '#!/bin/sh\necho "bwrap: Can\'t mount proc on /newroot/proc: Operation not permitted" >&2\nexit 1\n'
+    )
+    (fake / "bwrap").chmod(0o755)
+    path = f"{fake}{os.pathsep}{os.environ['PATH']}"
+    proc = xv("start", "codex", "-m", "q", "--no-pane", PATH=path)
+    assert proc.returncode == 2
+    for want in ("Can't mount proc", "systempaths=unconfined", "XV_NO_PIDNS=1"):
+        assert want in proc.stderr
+    assert not (data / "jobs").exists() or not any((data / "jobs").iterdir())
+
+
+@needs_bwrap
+def test_start_without_pidns_runs_read_only(xv, data):
+    job = start(xv, XV_NO_PIDNS=1)
+    assert xv("wait", job).stdout.startswith("status=done round=1 ")
+    assert json.loads((data / "jobs" / job / "meta.json").read_text())["pidns"] is False
+
+
+def test_start_without_pidns_refuses_write(xv, tmp_path):
+    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", make_worktree(tmp_path), XV_NO_PIDNS=1)
+    assert proc.returncode == 2
+    assert "--write needs a pid namespace" in proc.stderr
+
+
 def test_ask_resumes_session(xv, tmp_path):
     job = start(xv)
     assert xv("wait", job).returncode == 0

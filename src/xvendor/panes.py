@@ -33,18 +33,22 @@ def _run_cmd(job: str, n: int) -> list[str]:
     return [sys.executable, "-m", "xvendor", "_run", job, str(n)]
 
 
+def _background(job: str, n: int, cwd: str) -> None:
+    subprocess.Popen(
+        _run_cmd(job, n),
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def launch(store: JobStore, job: str, n: int) -> None:
     meta = store.meta(job)
     cwd = meta["cwd"]
     if not in_tmux() or meta["no_pane"]:
-        subprocess.Popen(
-            _run_cmd(job, n),
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        _background(job, n, cwd)
         return
 
     # a new pane gets the tmux server's environment, not ours
@@ -65,7 +69,13 @@ def launch(store: JobStore, job: str, n: int) -> None:
     split = ["-v", "-t", marked[-1]] if marked else ["-h", "-l", "40%", "-t", caller]
     proc = _tmux("split-window", "-d", *split, "-P", "-F", "#{pane_id}", "-c", cwd, *env, *_run_cmd(job, n))
     if proc.returncode != 0:
-        raise RuntimeError(f"tmux split-window failed: {proc.stderr.strip()}")
+        # e.g. "no space for new pane": the job record already exists, so run the round without a pane
+        print(
+            f"xv: tmux split-window failed ({proc.stderr.strip()}); no pane; follow with: xv watch {job}",
+            file=sys.stderr,
+        )
+        _background(job, n, cwd)
+        return
     pane = proc.stdout.strip()
     _tmux("set-option", "-p", "-t", pane, "@xv", "1")
     store.update(job, pane=pane)

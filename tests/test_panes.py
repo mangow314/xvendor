@@ -82,6 +82,21 @@ def test_second_pane_stacks_under_first(server, store, tmp_path):
     assert pane_count(server) == 3
 
 
+def test_split_failure_runs_in_background(server, store, tmp_path, monkeypatch, capsys, fakes_dir, fixture_path):
+    monkeypatch.setenv("TMUX_PANE", "%999")  # split-window -t a missing pane fails like "no space for new pane"
+    # the background round inherits this process's environment, not the tmux server's
+    monkeypatch.setenv("XV_DATA", str(store.jobs.parent))
+    monkeypatch.setenv("PATH", f"{fakes_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("XV_FAKE_FIXTURE", str(fixture_path("codex-done")))
+    job = new_job(store, tmp_path)
+    panes.launch(store, job, 1)
+    assert f"xv watch {job}" in capsys.readouterr().err
+    wait_done(store, job)
+    assert store.meta(job)["status"] == "done"
+    assert store.meta(job)["pane"] is None
+    assert pane_count(server) == 1
+
+
 def test_respawn_reuses_pane(server, store, tmp_path):
     job = new_job(store, tmp_path)
     panes.launch(store, job, 1)

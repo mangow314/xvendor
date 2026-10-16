@@ -97,6 +97,25 @@ def test_split_failure_runs_in_background(server, store, tmp_path, monkeypatch, 
     assert pane_count(server) == 1
 
 
+def test_pane_gets_caller_env(store, tmp_path, monkeypatch):
+    calls = []
+
+    def fake_tmux(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "%7\n" if args[0] == "split-window" else "", "")
+
+    monkeypatch.setattr(panes, "_tmux", fake_tmux)
+    monkeypatch.setenv("TMUX", "/s,0,0")
+    monkeypatch.setenv("TMUX_PANE", "%0")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("SOME_TOKEN", "hunter2")
+    panes.launch(store, new_job(store, tmp_path), 1)
+    split = next(a for a in calls if a[0] == "split-window")
+    passed = [split[i + 1] for i, a in enumerate(split) if a == "-e"]
+    assert "HTTPS_PROXY=http://proxy.test:3128" in passed
+    assert not any(e.startswith(("SOME_TOKEN=", "TMUX=", "TMUX_PANE=")) for e in passed)
+
+
 def test_respawn_reuses_pane(server, store, tmp_path):
     job = new_job(store, tmp_path)
     panes.launch(store, job, 1)

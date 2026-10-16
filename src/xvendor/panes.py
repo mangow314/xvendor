@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from xvendor.jobs import JobStore
+from xvendor.runner import scrub_env
 
 CARRY = "pane-carry.txt"  # previous round's visible pane text, printed and removed by the next _run
 
@@ -51,8 +52,14 @@ def launch(store: JobStore, job: str, n: int) -> None:
         _background(job, n, cwd)
         return
 
-    # a new pane gets the tmux server's environment, not ours
-    env = ["-e", f"XV_DATA={store.jobs.parent}", "-e", "XV_PANE=1"]
+    # a new pane gets the tmux server's environment, not ours: pass ours along (credential-like names dropped,
+    # tmux's own pane variables left to tmux) so settings such as HTTPS_PROXY reach the vendor as they do
+    # in the background path
+    env = []
+    for k, v in scrub_env(os.environ).items():
+        if k not in ("TMUX", "TMUX_PANE"):
+            env += ["-e", f"{k}={v}"]
+    env += ["-e", f"XV_DATA={store.jobs.parent}", "-e", "XV_PANE=1"]
     if pane_alive(meta["pane"]):
         # respawn-pane clears the visible screen without moving it into history, so the end of the
         # previous round would be lost when scrolling back; save it for the next _run to print first

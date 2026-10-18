@@ -88,3 +88,14 @@ def test_result_failed_status(v):
 
 def test_result_codex_fixture_is_empty(v, fixture_lines):
     assert v.result(fixture_lines("codex-done")) == (None, "", False)
+
+
+def test_model_from_settings(v, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    state = tmp_path / ".gemini" / "antigravity-cli"
+    state.mkdir(parents=True)
+    assert v.model("c", 0) is None
+    (state / "settings.json").write_text('{"model": "Gemini X (High)"}')
+    assert v.model("c", 0) == "Gemini X (High)"
+    (state / "settings.json").write_text("{}")
+    assert v.model("c", 0) is None

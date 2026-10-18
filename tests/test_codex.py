@@ -258,3 +258,38 @@ def test_result_skips_non_json(v):
 
 def test_result_empty(v):
     assert v.result([]) == (None, "", False)
+
+
+# model
+
+
+def _rollout(home, session, records):
+    d = home / "sessions" / "2026" / "10" / "18"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"rollout-2026-10-18T00-00-00-{session}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+def _ctx(ts, **payload):
+    return {"timestamp": ts, "type": "turn_context", "payload": payload}
+
+
+T0 = 1792281600  # 2026-10-18T00:00:00Z
+
+
+def test_model_from_rollout(v, tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    _rollout(tmp_path, "s1", [_ctx("2026-10-18T00:00:01.000Z", model="gpt-x", effort="high")])
+    _rollout(tmp_path, "s2", [_ctx("2026-10-18T00:00:01.000Z", model="gpt-y")])
+    assert v.model("s1", T0) == "gpt-x | effort high"
+    assert v.model("s2", T0) == "gpt-y | effort default"
+    assert v.model("missing", T0) is None
+
+
+def test_model_skips_earlier_rounds(v, tmp_path, monkeypatch):
+    # round 2 started at T0: round 1's turn_context must not be reported, before or after round 2's is written
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    old = [_ctx("2026-10-17T23:59:00.000Z", model="old"), {"type": "event_msg", "payload": {"type": "task_complete"}}]
+    _rollout(tmp_path, "s", old)
+    assert v.model("s", T0) is None
+    _rollout(tmp_path, "s", [*old, _ctx("2026-10-18T00:00:02.500Z", model="new"), {"type": "event_msg"}])
+    assert v.model("s", T0) == "new | effort default"

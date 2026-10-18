@@ -22,32 +22,58 @@ class Display:
 
     def __init__(self, console: Console | None = None):
         self.console = console or Console()
+        self._header: tuple[Text, Text] | None = None
 
     def _print(self, text: Text) -> None:
         # soft_wrap: let the terminal wrap long lines instead of Rich inserting newlines
         self.console.print(text, markup=False, highlight=False, soft_wrap=True)
 
     def header(
-        self, vendor: str, job: str, n: int, timeout: int, mode: str = "read", writable: str | None = None
+        self,
+        vendor: str,
+        job: str,
+        n: int,
+        timeout: int,
+        mode: str = "read",
+        writable: str | None = None,
+        profile: str | None = None,
     ) -> None:
+        """Held back until the model is known or other output comes, so the model can go on the header line."""
         line = Text()
         line.append(vendor, style=VENDOR_STYLE.get(vendor, ""))
         line.append(f" | {job[-4:]} | round {n} | limit {(timeout + 59) // 60} min")
-        if mode == "write":
-            line.append(f" | write {writable}", style="red")
-        self._print(line)
+        if profile:
+            line.append(f" | profile {profile}")
+        tail = Text(f" | write {writable}", style="red") if mode == "write" else Text()
+        self._header = (line, tail)
+
+    def flush(self, model: str | None = None) -> None:
+        """Print the held header, if any, with model appended when given."""
+        if self._header is None:
+            return
+        line, tail = self._header
+        self._header = None
+        if model:
+            line.append(f" | model {model}")
+        self._print(line + tail)
         self.console.print(Rule())
 
     def warn(self, text: str) -> None:
+        self.flush()
         self._print(Text(f"xv: {text}", style="red"))
 
     def event(self, e: Event) -> None:
+        if e.kind == "model":
+            self.flush(e.text)  # a model found after the header went out is not shown in the pane
+            return
         if e.kind not in LABEL:
             return
+        self.flush()
         style = "red" if e.kind == "error" else ""
         self._print(Text(f"  {LABEL[e.kind]:<5}  {_one_line(e.text)}", style=style))
 
     def finish(self, status: str, secs: int, job: str, response: str, stderr_tail: list[str]) -> None:
+        self.flush()
         if response.strip():
             self._print(Text("\n[ response ]"))
             self.console.print(Markdown(response))

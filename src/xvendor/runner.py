@@ -98,14 +98,26 @@ def run_round(
             timers.append(timer)
             timer.start()
 
+            session, model = meta["session"], None
             for raw in proc.stdout:
                 out.write(raw)
                 out.flush()
                 line = raw.decode("utf-8", "replace").rstrip("\n")
                 lines.append(line)
+                if session is None:
+                    session = vendor.result([line])[0]
+                if model is None and session is not None:
+                    model = vendor.model(session, meta["round_started"])
+                    if model is not None:
+                        store.update(job, model=model)
+                        on_event(Event("model", model))
                 if (ev := vendor.parse(line)) is not None:
                     on_event(ev)
             rc = proc.wait()
+            if model is None:  # written after the last event: one more look once the CLI has exited
+                model = vendor.model(session, meta["round_started"]) if session is not None else None
+                store.update(job, model=model)
+                on_event(Event("model", model or "unknown"))
         for t in timers:
             t.cancel()
         if rc < 0:  # killed by a signal: report it the way a shell would

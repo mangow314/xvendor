@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-Kind = Literal["action", "note", "error", "done"]
+Kind = Literal["action", "note", "error", "done", "model"]
 
 
 @dataclass(frozen=True)

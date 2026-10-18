@@ -1,6 +1,7 @@
 import json
 
 from xvendor.events import Event
+from xvendor.isolation import state_dir
 
 
 def _load(line: str) -> dict | None:
@@ -34,6 +35,16 @@ class AgyVendor:
         if ev.get("event") == "result":
             return Event("done", "")
         return None
+
+    def model(self, session: str, since: int) -> str | None:
+        """The model agy's settings.json names (effort is part of the name); the stream-json output has none.
+        This is the configured model, read when the round starts, not a record of what the round ran."""
+        try:
+            text = (state_dir("agy") / "settings.json").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        model = (_load(text) or {}).get("model")
+        return model if isinstance(model, str) and model else None
 
     def result(self, lines: list[str]) -> tuple[str | None, str, bool]:
         session, response, ok = None, "", False

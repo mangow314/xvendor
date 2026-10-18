@@ -1,6 +1,8 @@
 import json
+from datetime import datetime
 
 from xvendor.events import Event
+from xvendor.isolation import state_dir
 
 SHELL_PREFIXES = ("/bin/bash -lc ", "/bin/sh -lc ")
 QUOTES = ("'", '"')
@@ -76,6 +78,30 @@ class CodexVendor:
                 return Event("error", ev.get("message") or (ev.get("error") or {}).get("message") or line)
             case "turn.completed", _:
                 return Event("done", "")
+        return None
+
+    def model(self, session: str, since: int) -> str | None:
+        """Model and effort of the round started at epoch `since`, from codex's rollout file (the --json stream
+        carries neither). The rollout holds every round's turn_context, so older ones are skipped by timestamp;
+        None until this round's is written. effort is absent from it when codex uses the model default."""
+        for path in (state_dir("codex") / "sessions").glob(f"*/*/*/rollout-*-{session}.jsonl"):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return None
+            ctx = None
+            for line in text.splitlines():
+                ev = _load(line) or {}
+                if ev.get("type") != "turn_context":
+                    continue
+                try:
+                    ts = datetime.fromisoformat(ev.get("timestamp") or "").timestamp()
+                except ValueError:
+                    continue
+                if ts >= since:
+                    ctx = ev.get("payload") or {}
+            if ctx and ctx.get("model"):
+                return f"{ctx['model']} | effort {ctx.get('effort') or 'default'}"
         return None
 
     def result(self, lines: list[str]) -> tuple[str | None, str, bool]:

@@ -67,6 +67,7 @@ class JobStore:
                 "writable": writable,
                 "pidns": pidns,
                 "session": None,
+                "model": None,
                 "pane": None,
                 "round": 1,
                 "status": "running",
@@ -99,7 +100,14 @@ class JobStore:
         rd.mkdir()
         (rd / "request.md").write_text(request + "\n", encoding="utf-8")
         self.update(
-            job, round=n, status="running", rc=None, secs=None, round_started=int(time.time()), stop_requested=False
+            job,
+            round=n,
+            status="running",
+            rc=None,
+            secs=None,
+            model=None,
+            round_started=int(time.time()),
+            stop_requested=False,
         )
         return n
 

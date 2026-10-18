@@ -57,7 +57,7 @@ xv watch <job-id>                        # follows the current round from any te
 
 ```
 ${XV_DATA:-~/.local/share/xvendor}/jobs/<job-id>/
-|-- meta.json            vendor, cwd, session id, round, status, rc, secs, pane, run_pid, run_pgid
+|-- meta.json            vendor, cwd, session id, model, round, status, rc, secs, pane, run_pid, run_pgid
 `-- round-N/
     |-- request.md       the request that was sent
     |-- response.md      the other model's final answer, taken from the event stream

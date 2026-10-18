@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from xvendor import isolation, panes, runner
+from xvendor.events import Event
 from xvendor.jobs import JobError, JobStore
 
 DEFAULT_TIMEOUT = 1200
@@ -302,7 +303,9 @@ def cmd_run(store: JobStore, args) -> int:
         sys.stdout.flush()
         carry.unlink()
     display = Display()
-    display.header(meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"))
+    display.header(
+        meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"), meta["profile"]
+    )
     rc = 0
     try:
         runner.run_round(
@@ -315,6 +318,7 @@ def cmd_run(store: JobStore, args) -> int:
             )
         _finish(display, store, job, n)
     except Exception as e:  # noqa: BLE001 - pane must show any error; runner already marked the job failed
+        display.flush()
         print(f"xv: _run failed: {e}", file=sys.stderr)
         rc = 1
     if os.environ.get("XV_PANE") == "1":
@@ -332,12 +336,19 @@ def cmd_watch(store: JobStore, args) -> int:
     n = meta["round"]
     vendor = vendor_for(meta["vendor"])
     display = Display()
-    display.header(meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"))
+    display.header(
+        meta["vendor"], job, n, meta["timeout"], meta.get("mode", "read"), meta.get("writable"), meta["profile"]
+    )
     events = store.round_dir(job, n) / "events.jsonl"
     f = None
     buf = ""
+    model_shown = False
     try:
         while True:
+            # the runner records the model in meta; the events file has no line for it
+            if not model_shown and (model := store.meta(job).get("model")):
+                display.event(Event("model", model))
+                model_shown = True
             if f is None and events.exists():
                 f = open(events, encoding="utf-8", errors="replace")
             chunk = f.read() if f else ""

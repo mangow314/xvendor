@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 
 import pytest
 
@@ -274,3 +275,25 @@ def test_nested_git_written_on_failed_round(store, tmp_path, env, fixture_path, 
     m = store.meta(job)
     assert m["status"] == "failed"
     assert m["nested_git"] == [str(work / "sub" / ".git")]
+
+
+def test_model_recorded(store, tmp_path, env, fixture_path):
+    session = "01a126af-a00e-7501-bc5e-5b7215dc60ac"
+    d = tmp_path / "home" / ".codex" / "sessions" / "2026" / "10" / "18"
+    d.mkdir(parents=True)
+    now = datetime.now(UTC).isoformat()
+    ctx = {"timestamp": now, "type": "turn_context", "payload": {"model": "gpt-x", "effort": "low"}}
+    (d / f"rollout-x-{session}.jsonl").write_text(json.dumps(ctx) + "\n")
+    job = new_job(store, tmp_path)
+    got = []
+    runner.run_round(store, job, 1, CodexVendor(), got.append, popen_env=env(fixture_path("codex-done")))
+    assert store.meta(job)["model"] == "gpt-x | effort low"
+    assert [e.text for e in got if e.kind == "model"] == ["gpt-x | effort low"]
+
+
+def test_model_unknown(store, tmp_path, env, fixture_path):
+    job = new_job(store, tmp_path)
+    got = []
+    runner.run_round(store, job, 1, CodexVendor(), got.append, popen_env=env(fixture_path("codex-done")))
+    assert store.meta(job)["model"] is None
+    assert [e.text for e in got if e.kind == "model"] == ["unknown"]

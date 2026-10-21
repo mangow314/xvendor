@@ -8,6 +8,9 @@ import pytest
 from xvendor import panes
 from xvendor.jobs import JobStore
 
+# rounds run the real isolation.check, which needs codex state under HOME
+pytestmark = pytest.mark.usefixtures("fake_home")
+
 
 def _tmux_usable(tmp_path_factory) -> str | None:
     """Return why an isolated tmux server cannot run here (e.g. sandbox blocks unix sockets), or None."""
@@ -35,6 +38,9 @@ def server(tmp_path_factory, monkeypatch, fakes_dir, fixture_path):
     caller = subprocess.run(
         ["tmux", "-S", str(sock), "display-message", "-p", "#{pane_id}"], capture_output=True, text=True, check=True
     ).stdout.strip()
+    # launch passes this process's environment to the pane over the server's (-e), so point it at the fakes too
+    monkeypatch.setenv("PATH", env["PATH"])
+    monkeypatch.setenv("XV_FAKE_FIXTURE", env["XV_FAKE_FIXTURE"])
     # with $TMUX set, a plain `tmux` client talks to this server
     monkeypatch.setenv("TMUX", f"{sock},0,0")
     monkeypatch.setenv("TMUX_PANE", caller)

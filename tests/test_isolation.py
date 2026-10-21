@@ -21,6 +21,12 @@ def test_codex_passthrough_off_linux(tmp_path, monkeypatch, capsys, platform):
     assert "runs without xv isolation" in capsys.readouterr().err
 
 
+def run_listing() -> str:
+    """os.listdir('/run') inside bwrap: empty, except the top dir of a /etc/resolv.conf re-bound from /run."""
+    real = os.path.realpath("/etc/resolv.conf")
+    return str([real.split("/")[2]]) if real.startswith("/run/") and os.path.isfile(real) else "[]"
+
+
 def fake_codex_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     state = home / ".codex"
@@ -50,7 +56,8 @@ def test_codex_argv_structure(tmp_path, monkeypatch):
     assert has("--ro-bind", f"{st}/config.toml", f"{st}/config.toml")
     assert has("--ro-bind", f"{st}/hooks", f"{st}/hooks")
     assert has("--ro-bind", f"{st}/local.config.toml", f"{st}/local.config.toml")
-    assert has("--tmpfs", "/run")
+    # _bwrap hides /run only where it exists; a macOS host faking linux has none
+    assert has("--tmpfs", "/run") == os.path.isdir("/run")
     assert not has("--ro-bind", "/dev/null", f"{st}/auth.json")
     assert has("--ro-bind", "/dev/null", str(home / ".gemini" / "oauth_creds.json"))
     assert argv[-4:] == ["--", "codex", "exec", "hi"]
@@ -100,7 +107,7 @@ def test_real_bwrap_codex_state(tmp_path_factory, monkeypatch):
     )
     proc = subprocess.run(wrap("codex", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.splitlines() == ["ok", "denied", "denied", "TOKEN", "[]"]
+    assert proc.stdout.splitlines() == ["ok", "denied", "denied", "TOKEN", run_listing()]
 
 
 @needs_bwrap
@@ -174,6 +181,7 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
     assert (tmp / "shadow" / "bin" / "agentapi").read_text() == (state / "bin" / "agentapi").read_text()
 
 
+@pytest.mark.usefixtures("fake_home")
 @needs_bwrap
 def test_agy_x11_tmpfs_follows_host_dir(tmp_path, monkeypatch):
     real_isdir = os.path.isdir
@@ -184,6 +192,7 @@ def test_agy_x11_tmpfs_follows_host_dir(tmp_path, monkeypatch):
     assert "/tmp/.X11-unix" not in wrap("agy", ["agy"], tmp_path)
 
 
+@pytest.mark.usefixtures("fake_home")
 @needs_bwrap
 def test_resolv_rebound_when_under_run(tmp_path, monkeypatch):
     real = "/run/systemd/resolve/stub-resolv.conf"
@@ -198,6 +207,7 @@ def test_resolv_rebound_when_under_run(tmp_path, monkeypatch):
     assert bind_at > run_at
 
 
+@pytest.mark.usefixtures("fake_home")
 @needs_bwrap
 def test_agy_skips_missing_tmux_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path / "nowhere"))
@@ -322,6 +332,7 @@ def probe(path):
     return [sys.executable, "-c", f"open({str(path)!r}, 'w').write('x')"]
 
 
+@pytest.mark.usefixtures("fake_home")
 @needs_bwrap
 def test_real_bwrap_blocks_writes_outside(tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside")
@@ -429,7 +440,7 @@ def test_real_bwrap_hides_run_and_x11(tmp_path_factory, monkeypatch):
     )
     proc = subprocess.run(wrap("agy", [sys.executable, "-c", code], tmp), capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.splitlines() == ["[]", "[]", "True"]
+    assert proc.stdout.splitlines() == [run_listing(), "[]", "True"]
 
 
 @needs_bwrap
@@ -649,6 +660,7 @@ def test_writable_overlaps_hidden(tmp_path):
     assert isolation.writable_overlaps_hidden(home, home / "ok", own) is None
 
 
+@pytest.mark.usefixtures("fake_home")
 @needs_bwrap
 @needs_git
 def test_real_bwrap_write_dir_only(tmp_path_factory):

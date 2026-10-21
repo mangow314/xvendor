@@ -50,7 +50,8 @@ def test_codex_argv_structure(tmp_path, monkeypatch):
     assert has("--ro-bind", f"{st}/config.toml", f"{st}/config.toml")
     assert has("--ro-bind", f"{st}/hooks", f"{st}/hooks")
     assert has("--ro-bind", f"{st}/local.config.toml", f"{st}/local.config.toml")
-    assert has("--tmpfs", "/run")
+    # _bwrap hides /run only where it exists; a macOS host faking linux has none
+    assert has("--tmpfs", "/run") == os.path.isdir("/run")
     assert not has("--ro-bind", "/dev/null", f"{st}/auth.json")
     assert has("--ro-bind", "/dev/null", str(home / ".gemini" / "oauth_creds.json"))
     assert argv[-4:] == ["--", "codex", "exec", "hi"]

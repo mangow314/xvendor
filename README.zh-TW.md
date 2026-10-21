@@ -127,7 +127,7 @@ exclude = ["*PASSWORD*", "*PASSW*", "*CRED*"]
   - agy，`~/.gemini/antigravity-cli`：`settings.json`、`builtin`。`bin` 改以每輪用完即丟的副本蓋上（agy 每次執行 shell 指令前會重寫 `bin/agentapi`，副本讓它寫得進去，宿主的檔案不變、round 結束副本就刪）。
   - codex，`$CODEX_HOME`（預設 `~/.codex`）：`config.toml`、`AGENTS.md`、`hooks`、`rules`、`skills`、`plugins`、`agents`，以及每個 `*.config.toml` profile 檔。`config.toml` 與 `hooks` 必須存在，否則這一輪會被拒絕，而不是在無保護下執行。
 - **環境變數清洗。** 名稱符合 `key`、`token`、`secret`、`passw`、`cred`、`auth`（不分大小寫）的變數不會傳給廠商，`GIT_CONFIG_*` 整個家族也不傳。這些一律保留：`XV_DATA`、`XV_PANE`、`CODEX_HOME`、`PATH`、`HOME`、`TMPDIR`、`TERM`、`LANG`、`TMUX`、`TMUX_PANE` 與 `LC_*`。bwrap 內 `TMUX`、`TMUX_PANE` 會被 unset。廠商靠檔案登入，不靠環境變數。
-- **codex 自己的沙箱**（`-s read-only`，寫入模式為 `workspace-write`）保留作為第二層。追問輪會再傳一次當前模式的 sandbox（唯讀 job 是 `read-only`，寫入 job 是 `workspace-write`），以 `-c sandbox_mode=...` 傳入，因為 resume 的 codex session 不會沿用第一輪的旗標。
+- **codex 自己的沙箱**（`-s read-only`，寫入模式為 `workspace-write`）保留作為第二層。追問輪會再傳一次當前模式的 sandbox（唯讀 job 是 `read-only`，寫入 job 是 `workspace-write`），以 `-c sandbox_mode=...` 傳入，因為 resume 的 codex session 不會沿用第一輪的旗標。所有 `-c` 都放在 `exec` 前面：`exec` 或 `resume` 後面只要出現 `-c`，codex 就會丟掉最外層的全部 `-c`，包括包裝腳本帶入的 `model_provider`。
 - **agy 自己的 `--sandbox`** 擋不住它的寫檔工具，所以 `xv` 不靠它。
 - **寧可拒絕，不降級。** 缺 `bwrap`（Linux）或 `/usr/bin/sandbox-exec`（macOS），或是其他平台時，`xv start agy` 直接拒絕。Linux 上 codex 也需要 `bwrap`。**macOS 上 codex 不經 `xv` 隔離**：只有 codex 自己的沙箱，`xv` 會印出一行說明。
 

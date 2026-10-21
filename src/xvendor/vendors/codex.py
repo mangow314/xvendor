@@ -46,17 +46,19 @@ class CodexVendor:
             if mode == "write"
             else []
         )
+        # every -c goes before exec: a -c after exec/resume drops all top-level -c, e.g. a wrapper's
+        # model_provider, and codex falls back to the default openai provider (0.162.1, 2026-10-20)
         if round == 1:
-            return ["codex", *pf, "exec", "-s", sandbox, *roots, "--skip-git-repo-check", "--json", prompt]
+            return ["codex", *pf, *roots, "exec", "-s", sandbox, "--skip-git-repo-check", "--json", prompt]
         # resume does not inherit round 1's -s read-only (2026-10-10), so pass it every round
         return [
             "codex",
             *pf,
-            "exec",
-            "resume",
             "-c",
             f'sandbox_mode="{sandbox}"',
             *roots,
+            "exec",
+            "resume",
             "--skip-git-repo-check",
             "--json",
             session,

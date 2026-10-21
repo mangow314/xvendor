@@ -56,10 +56,10 @@ def test_build_round1_profile(v):
 def test_build_resume(v):
     assert v.build(2, "sid-1", "again", None) == [
         "codex",
-        "exec",
-        "resume",
         "-c",
         'sandbox_mode="read-only"',
+        "exec",
+        "resume",
         "--skip-git-repo-check",
         "--json",
         "sid-1",
@@ -72,10 +72,10 @@ def test_build_resume_profile(v):
         "codex",
         "-p",
         "local",
-        "exec",
-        "resume",
         "-c",
         'sandbox_mode="read-only"',
+        "exec",
+        "resume",
         "--skip-git-repo-check",
         "--json",
         "sid-1",
@@ -86,21 +86,21 @@ def test_build_resume_profile(v):
 def test_build_write_mode(v):
     assert v.build(1, None, "hi", None, mode="write") == [
         "codex",
+        *ROOTS,
         "exec",
         "-s",
         "workspace-write",
-        *ROOTS,
         "--skip-git-repo-check",
         "--json",
         "hi",
     ]
     assert v.build(2, "sid-1", "again", None, mode="write") == [
         "codex",
-        "exec",
-        "resume",
         "-c",
         'sandbox_mode="workspace-write"',
         *ROOTS,
+        "exec",
+        "resume",
         "--skip-git-repo-check",
         "--json",
         "sid-1",
@@ -115,6 +115,13 @@ def test_write_mode_codex_sandbox_roots(v):
             assert argv[argv.index(value) - 1] == "-c"
     for argv in (v.build(1, None, "hi", None), v.build(2, "sid-1", "again", None)):
         assert not any("sandbox_workspace_write" in a for a in argv)
+
+
+def test_build_no_config_after_exec(v):
+    # a -c after exec/resume drops the top-level -c a wrapper passes (e.g. model_provider)
+    for mode in ("read", "write"):
+        for argv in (v.build(1, None, "hi", "p", mode=mode), v.build(2, "sid-1", "again", "p", mode=mode)):
+            assert "-c" not in argv[argv.index("exec") :]
 
 
 # parse

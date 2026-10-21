@@ -252,7 +252,9 @@ bubblewrap (`bwrap`) layout:
   stays on as a second layer. Follow-up rounds pass the current mode's
   sandbox again (`read-only` for a read-only job, `workspace-write` for a
   write job) via `-c sandbox_mode=...`, because a resumed codex session does
-  not keep the first round's flag.
+  not keep the first round's flag. Every `-c` goes before `exec`: a `-c`
+  after `exec` or `resume` makes codex drop all top-level `-c`, including a
+  wrapper script's `model_provider`.
 - **agy's own `--sandbox`** does not stop its file-writing tools, so `xv`
   does not rely on it.
 - **Refuse, never degrade.** `xv start agy` refuses when `bwrap` (Linux) or

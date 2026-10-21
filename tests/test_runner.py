@@ -18,17 +18,8 @@ needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap"
 
 
 @pytest.fixture(autouse=True)
-def codex_home(tmp_path, monkeypatch):
-    """Minimal ~/.codex and agy state so vendors pass isolation.check; without bwrap, wrap becomes a passthrough."""
-    home = tmp_path / "home"
-    (home / ".codex" / "hooks").mkdir(parents=True)
-    (home / ".codex" / "config.toml").write_text("")
-    agy = home / ".gemini" / "antigravity-cli"
-    (agy / "bin").mkdir(parents=True)
-    (agy / "builtin").mkdir()
-    (agy / "settings.json").write_text("{}")
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.delenv("CODEX_HOME", raising=False)
+def codex_home(fake_home, monkeypatch):
+    """Vendors pass isolation.check against fake_home; without bwrap, wrap becomes a passthrough."""
     if sys.platform != "linux" or shutil.which("bwrap") is None:
         monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None, pidns=True: list(argv))
 

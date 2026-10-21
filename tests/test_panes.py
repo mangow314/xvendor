@@ -8,6 +8,9 @@ import pytest
 from xvendor import panes
 from xvendor.jobs import JobStore
 
+# rounds run the real isolation.check, which needs codex state under HOME
+pytestmark = pytest.mark.usefixtures("fake_home")
+
 
 def _tmux_usable(tmp_path_factory) -> str | None:
     """Return why an isolated tmux server cannot run here (e.g. sandbox blocks unix sockets), or None."""

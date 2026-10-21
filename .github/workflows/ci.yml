@@ -30,6 +30,11 @@ jobs:
       # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor; bwrap needs them
       - if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # real codex for tests/test_codex_contract.py (offline, no login); bump to check a new codex release
+      - run: |
+          npm install --prefix "$RUNNER_TEMP/codex" --no-audit --no-fund @openai/codex@0.163.0
+          echo "$RUNNER_TEMP/codex/node_modules/.bin" >> "$GITHUB_PATH"
       - uses: astral-sh/setup-uv@v10.3.0
       - run: uv sync --locked
+      - run: codex --version
       - run: uv run pytest -q

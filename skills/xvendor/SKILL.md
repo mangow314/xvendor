@@ -45,7 +45,10 @@ xv stop  <job-id>                        # kills the current round (the session 
 xv list [--all]                          # running jobs and jobs from the last 3 days, with vendor, round, status and seconds (--all: every job)
 xv close <job-id>                        # closes the job's pane (run once per job when done)
 xv watch <job-id>                        # follows the current round from any terminal (for the user)
+xv doctor [codex] [agy]                  # one tiny real round per vendor; rc 0 = all can run a job now, else FAIL + why
 ```
+
+Run `xv doctor` after a job fails without a clear reason, or after the environment changed (node version, PATH, a vendor CLI reinstalled or logged out), not before every job: each run spends one real request per vendor, and agy's quota is the scarce one. Drop a FAIL vendor from research work; for a review round, fix it or stop, since the round's evidence depends on which vendor ran.
 
 `<job-id>` can also be its last 4 characters (the pane ends with `xv show 3949`); it is accepted only when it matches exactly one job. The pane lists actions as they happen and prints the answer once, as Markdown, when the round ends. Malformed input (job id, round, `--timeout`, `--profile`) always gives `xv: …` and rc 2.
 
@@ -65,7 +68,7 @@ ${XV_DATA:-~/.local/share/xvendor}/jobs/<job-id>/
     `-- stderr.log
 ```
 
-status is one of `running`, `done`, `failed`, `timeout`, `stopped`. When reporting to the user or citing a result elsewhere, give the job id and the path to `response.md`.
+status is one of `running`, `done`, `failed`, `timeout`, `stopped`. On `failed`, meta `error` holds the vendor's own reason (quota, 503, output token limit, flagged content) when it gave one; `xv wait` and `xv show` print it to stderr. When reporting to the user or citing a result elsewhere, give the job id and the path to `response.md`.
 
 ## Writing the brief
 

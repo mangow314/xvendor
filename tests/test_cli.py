@@ -80,6 +80,14 @@ def test_start_wait_codex(xv):
     assert xv("show", job).stdout.startswith("### Data directory paths")
 
 
+def test_show_reports_vendor_error(xv, fixture_path):
+    job = start(xv, XV_FAKE_FIXTURE=fixture_path("codex-failed"))
+    assert xv("wait", job).returncode == 1
+    proc = xv("show", job)
+    assert proc.stdout.startswith("Found a possible way around the restriction")
+    assert "xv: round 1 failed: This content was flagged" in proc.stderr
+
+
 @needs_bwrap
 def test_start_wait_agy(xv, fixture_path):
     job = start(xv, "agy", XV_FAKE_FIXTURE=fixture_path("agy-done"))
@@ -357,6 +365,25 @@ def test_ask_refuses_when_other_writer_running(xv, tmp_path):
     assert proc.returncode == 2
     assert "another job is still writing" in proc.stderr
     xv("stop", b.stdout.strip())
+
+
+def test_doctor_ok(xv):
+    proc = xv("doctor", "codex")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert re.fullmatch(r"codex  ok  \d+s\n", proc.stdout)
+
+
+def test_doctor_reports_vendor_error(xv, fixture_path):
+    proc = xv("doctor", "codex", XV_FAKE_FIXTURE=fixture_path("codex-failed"))
+    assert proc.returncode == 1
+    assert proc.stdout.startswith("codex  FAIL")
+    assert "This content was flagged" in proc.stdout
+
+
+def test_doctor_missing_cli(xv):
+    proc = xv("doctor", "agy", PATH="/usr/bin:/bin")
+    assert proc.returncode == 1
+    assert proc.stdout == "agy    FAIL  0s  agy not found on PATH\n"
 
 
 def test_list_empty(xv):

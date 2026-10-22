@@ -63,6 +63,7 @@ xv stop <job>                      # 中途砍掉這一輪；session 保留
 xv list [--all]                    # 執行中＋最近 3 天的 job（--all 列全部）
 xv close <job>                     # 關掉 job 的 pane
 xv watch <job>                     # 在任何終端機跟看執行中的這一輪
+xv doctor [codex] [agy]            # 每家跑一次極小的真實請求：現在能不能開 job
 
 # codex profile（檔案放在 ~/.codex 或 $CODEX_HOME）
 xv start codex --profile xv-review --file brief.md                 # review：關閉 web search

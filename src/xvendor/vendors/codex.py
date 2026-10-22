@@ -121,3 +121,16 @@ class CodexVendor:
             elif kind == "turn.completed":
                 ok = True
         return session, response, ok
+
+    def error(self, lines: list[str]) -> str | None:
+        """The message of the last error or turn.failed event (model at capacity, content flagged, MCP auth)."""
+        error = None
+        for line in lines:
+            ev = _load(line)
+            if ev is None:
+                continue
+            if ev.get("type") == "error":
+                error = ev.get("message") or error
+            elif ev.get("type") == "turn.failed":
+                error = (ev.get("error") or {}).get("message") or error
+        return error

@@ -86,6 +86,18 @@ def test_result_failed_status(v):
     assert v.result(lines) == ("c", "", False)
 
 
+def test_error_from_failed_result(v):
+    lines = [
+        '{"event":"init","conversation_id":"c"}',
+        '{"event":"result","result":{"status":"ERROR","response":"partial","error":"UNAVAILABLE (code 503)"}}',
+    ]
+    assert v.error(lines) == "UNAVAILABLE (code 503)"
+
+
+def test_error_none_on_success(v, fixture_lines):
+    assert v.error(fixture_lines("agy-done")) is None
+
+
 def test_result_codex_fixture_is_empty(v, fixture_lines):
     assert v.result(fixture_lines("codex-done")) == (None, "", False)
 

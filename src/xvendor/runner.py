@@ -140,7 +140,7 @@ def run_round(
             run_pid=None,
             run_pgid=None,
             session=session or meta["session"],
-            error=None,
+            error=vendor.error(lines) if status == "failed" else None,
         )
         return status
     finally:

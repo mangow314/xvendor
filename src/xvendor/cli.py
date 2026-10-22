@@ -2,9 +2,12 @@ import argparse
 import errno
 import os
 import re
+import shutil
 import signal
 import sys
+import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from xvendor import isolation, panes, runner
@@ -12,6 +15,8 @@ from xvendor.events import Event
 from xvendor.jobs import JobError, JobStore
 
 DEFAULT_TIMEOUT = 1200
+DOCTOR_TIMEOUT = 180
+DOCTOR_PROMPT = "Reply with exactly: OK"
 LIST_DAYS = 3
 PROFILE_RE = re.compile(r"[A-Za-z0-9_-]+")
 
@@ -89,6 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
         ("watch", "follow the current round in this terminal"),
     ]:
         sub.add_parser(name, help=text).add_argument("job")
+
+    p = sub.add_parser("doctor", help="check that each vendor can run a job now (one tiny real round each)")
+    p.add_argument(
+        "vendors", nargs="*", choices=["codex", "agy"], metavar="VENDOR", help="codex and/or agy (default both)"
+    )
 
     p = sub.add_parser("_run")  # internal: one round, started by a pane or in the background
     p.add_argument("job")
@@ -223,11 +233,15 @@ def cmd_wait(store: JobStore, args) -> int:
 
 def cmd_show(store: JobStore, args) -> int:
     job = store.resolve(args.job)
-    n = args.round if args.round is not None else store.meta(job)["round"]
+    meta = store.meta(job)
+    n = args.round if args.round is not None else meta["round"]
     path = store.round_dir(job, n) / "response.md"
     if not path.is_file():
         raise Fail(f"round {n} has no response: {path}")
-    if nested := store.meta(job).get("nested_git"):
+    # meta holds only the latest round's error
+    if n == meta["round"] and meta["status"] != "done" and (error := meta.get("error")):
+        print(f"xv: round {n} {meta['status']}: {error}", file=sys.stderr)
+    if nested := meta.get("nested_git"):
         print("xv: nested git repositories (remove before any git command): " + ", ".join(nested), file=sys.stderr)
     sys.stdout.write(path.read_text(encoding="utf-8"))
     return 0
@@ -374,6 +388,41 @@ def cmd_watch(store: JobStore, args) -> int:
     return 0
 
 
+def _doctor(vendor: str) -> tuple[str | None, int]:
+    """Why vendor cannot run a job right now (None if it can), and the ping round's seconds."""
+    try:
+        isolation.check(vendor)
+    except isolation.UnsupportedPlatform as e:
+        return str(e), 0
+    if shutil.which(vendor) is None:
+        return f"{vendor} not found on PATH", 0
+    if not isolation.state_dir(vendor).is_dir():
+        return f"{isolation.state_dir(vendor)} is missing; run {vendor} once interactively and log in", 0
+    pidns = os.environ.get("XV_NO_PIDNS") != "1"
+    if pidns and sys.platform == "linux" and (err := isolation.pidns_error()):
+        return f"bwrap cannot create a pid namespace: {err}", 0
+    # a real round through the same sandbox and env as `xv start`: catches login, quota and capacity errors
+    with tempfile.TemporaryDirectory(prefix="xv-doctor-") as d:
+        store = JobStore(Path(d))
+        job = store.create(vendor, d, DOCTOR_TIMEOUT, True, None, DOCTOR_PROMPT, None, pidns)
+        status = runner.run_round(store, job, 1, vendor_for(vendor), popen_env=runner.scrub_env(os.environ))
+        meta = store.meta(job)
+        secs = meta.get("secs") or 0
+        if status == "done":
+            return None, secs
+        tail = " | ".join(_stderr_tail(store.round_dir(job, 1))) or "no output"
+        return meta.get("error") or f"ping round {status} (rc {meta.get('rc')}): {tail}", secs
+
+
+def cmd_doctor(store: JobStore, args) -> int:
+    vendors = args.vendors or ["codex", "agy"]
+    with ThreadPoolExecutor(len(vendors)) as pool:
+        results = list(pool.map(_doctor, vendors))
+    for vendor, (problem, secs) in zip(vendors, results, strict=True):
+        print(f"{vendor:<6} {'ok' if problem is None else 'FAIL'}  {secs}s" + (f"  {problem}" if problem else ""))
+    return 0 if all(problem is None for problem, _ in results) else 1
+
+
 COMMANDS = {
     "start": cmd_start,
     "ask": cmd_ask,
@@ -384,6 +433,7 @@ COMMANDS = {
     "close": cmd_close,
     "_run": cmd_run,
     "watch": cmd_watch,
+    "doctor": cmd_doctor,
 }
 
 

@@ -237,6 +237,14 @@ def test_result_codex_failed(v, fixture_lines):
     assert ok is False
 
 
+def test_error_codex_failed(v, fixture_lines):
+    assert v.error(fixture_lines("codex-failed")).startswith("This content was flagged for possible cybersecurity risk")
+
+
+def test_error_none_on_done(v, fixture_lines):
+    assert v.error(fixture_lines("codex-done")) is None
+
+
 def test_result_agy_done(v, fixture_lines):
     assert v.result(fixture_lines("agy-done")) == (None, "", False)
 

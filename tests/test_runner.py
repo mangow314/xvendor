@@ -128,6 +128,19 @@ def test_turn_failed_is_failed(store, tmp_path, env, fixture_path):
     job = new_job(store, tmp_path)
     assert runner.run_round(store, job, 1, CodexVendor(), popen_env=env(fixture_path("codex-failed"))) == "failed"
     assert store.meta(job)["session"] == "01a1263b-7821-7c52-b722-51a025c3338b"
+    assert store.meta(job)["error"].startswith("This content was flagged")
+
+
+def test_agy_error_recorded_with_rc_zero(store, tmp_path, env):
+    fixture = tmp_path / "agy-error.jsonl"
+    fixture.write_text(
+        '{"event":"init","conversation_id":"c"}\n'
+        '{"event":"result","result":{"status":"ERROR","response":"half","error":"The stream was interrupted."}}\n'
+    )
+    job = new_job(store, tmp_path, vendor="agy")
+    assert runner.run_round(store, job, 1, AgyVendor(), popen_env=env(fixture)) == "failed"
+    assert store.meta(job)["rc"] == 0
+    assert store.meta(job)["error"] == "The stream was interrupted."
 
 
 def test_timeout(store, tmp_path, env, fixture_path):

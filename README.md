@@ -90,6 +90,7 @@ xv stop <job>                      # cut a round short; the session is kept
 xv list [--all]                    # running jobs + jobs from the last 3 days (--all: every job)
 xv close <job>                     # close the job's pane
 xv watch <job>                     # follow a running round from any terminal
+xv doctor [codex] [agy]            # one tiny real round per vendor: can it run a job right now?
 
 # codex profiles (files in ~/.codex, or $CODEX_HOME)
 xv start codex --profile xv-review --file brief.md                 # review: web search off

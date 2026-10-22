@@ -59,3 +59,13 @@ class AgyVendor:
                 response = res.get("response") or ""
                 ok = ok or res.get("status") == "SUCCESS"
         return session, response, ok
+
+    def error(self, lines: list[str]) -> str | None:
+        """The failure agy reports in its last result event (quota, 503, output token limit); its stderr is often empty."""
+        error = None
+        for line in lines:
+            ev = _load(line)
+            if ev is not None and ev.get("event") == "result":
+                res = ev.get("result") or {}
+                error = res.get("error") if res.get("status") != "SUCCESS" else None
+        return error or None

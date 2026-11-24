@@ -37,6 +37,15 @@ def nonneg_int(value: str) -> int:
     return int(value)
 
 
+def shown(paths: list[str]) -> str:
+    """Join paths for a terminal message. A vendor in write mode picks the directory names, so control and format
+    characters (and the backslash, to keep the form unambiguous) are written as Python escapes such as \\x1b."""
+    return ", ".join(
+        "".join(c if c.isprintable() and c != "\\" else c.encode("unicode_escape").decode("ascii") for c in path)
+        for path in paths
+    )
+
+
 def vendor_for(name: str):
     # imported lazily so `xv list` does not pay for vendor modules
     if name == "codex":
@@ -227,7 +236,7 @@ def cmd_wait(store: JobStore, args) -> int:
     if meta["status"] != "done" and (error := meta.get("error")):
         print(f"xv: {error}", file=sys.stderr)
     if nested := meta.get("nested_git"):
-        print("xv: nested git repositories (remove before any git command): " + ", ".join(nested), file=sys.stderr)
+        print("xv: nested git repositories (remove before any git command): " + shown(nested), file=sys.stderr)
     return 0 if meta["status"] == "done" else 1
 
 
@@ -242,7 +251,7 @@ def cmd_show(store: JobStore, args) -> int:
     if n == meta["round"] and meta["status"] != "done" and (error := meta.get("error")):
         print(f"xv: round {n} {meta['status']}: {error}", file=sys.stderr)
     if nested := meta.get("nested_git"):
-        print("xv: nested git repositories (remove before any git command): " + ", ".join(nested), file=sys.stderr)
+        print("xv: nested git repositories (remove before any git command): " + shown(nested), file=sys.stderr)
     sys.stdout.write(path.read_text(encoding="utf-8"))
     return 0
 
@@ -328,7 +337,7 @@ def cmd_run(store: JobStore, args) -> int:
         if nested := store.meta(job).get("nested_git"):
             display.warn(
                 f"nested git repositories under {meta['writable']}: remove them before running any git "
-                "command in the worktree: " + ", ".join(nested)
+                "command in the worktree: " + shown(nested)
             )
         _finish(display, store, job, n)
     except Exception as e:  # noqa: BLE001 - pane must show any error; runner already marked the job failed

@@ -271,6 +271,32 @@ def test_wait_reports_nested_git(xv, data, tmp_path):
     assert json.loads((data / "jobs" / job / "meta.json").read_text())["nested_git"]
 
 
+@pytest.mark.parametrize("command", ["wait", "show", "_run"])
+def test_nested_git_warning_escapes_control_chars(command, data, tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from xvendor import cli
+    from xvendor.jobs import JobStore
+
+    # a vendor in write mode picks this directory name: ESC, CR, LF, a C1 CSI and a bidi override
+    path = "/w/目錄/a\x1b[2Kb\rc\nxv: fake\x9b\u202e\\d/.git"
+    store = JobStore(data)
+    job = store.create("codex", str(tmp_path), 60, True, None, "q", str(tmp_path))
+    (store.round_dir(job, 1) / "response.md").write_text("ok\n", encoding="utf-8")
+    store.update(job, status="done", secs=1, nested_git=[path])
+    # in-process and without text-mode pipes, which would turn a raw CR into LF; no bwrap or tmux involved
+    monkeypatch.setattr(cli.runner, "run_round", lambda *a, **k: None)
+    monkeypatch.setattr(cli.signal, "signal", lambda *a: None)
+    monkeypatch.delenv("XV_PANE", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)  # Rich's own colour codes would count as control characters
+    cli.COMMANDS[command](store, argparse.Namespace(job=job, round=1 if command == "_run" else None, timeout=None))
+    cap = capsys.readouterr()
+    text = cap.out + cap.err
+    assert not [c for c in text if c != "\n" and not c.isprintable()]
+    assert "\nxv: fake" not in text
+    assert r"/w/目錄/a\x1b[2Kb\rc\nxv: fake\x9b\u202e\\d/.git" in text.replace("\n", "")  # the pane may wrap lines
+
+
 def test_start_write_refuses_gitlinks(xv_no_round, tmp_path):
     main = tmp_path / "main-wt"
     ident = ["-c", "user.name=t", "-c", "user.email=t@x"]

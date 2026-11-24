@@ -270,6 +270,7 @@ def test_wait_reports_nested_git(xv, data, tmp_path):
     assert "nested git repositories" in proc.stderr
     assert json.loads((data / "jobs" / job / "meta.json").read_text())["nested_git"]
 
+
 @pytest.mark.parametrize("command", ["wait", "show", "_run"])
 def test_nested_git_warning_escapes_control_chars(command, data, tmp_path, monkeypatch, capsys):
     import argparse

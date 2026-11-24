@@ -281,6 +281,7 @@ def test_nested_git_warning_escapes_control_chars(command, data, tmp_path, monke
     monkeypatch.setattr(cli.runner, "run_round", lambda *a, **k: None)
     monkeypatch.setattr(cli.signal, "signal", lambda *a: None)
     monkeypatch.delenv("XV_PANE", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)  # Rich's own colour codes would count as control characters
     cli.COMMANDS[command](store, argparse.Namespace(job=job, round=1 if command == "_run" else None, timeout=None))
     cap = capsys.readouterr()
     text = cap.out + cap.err

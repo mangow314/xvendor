@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -11,7 +10,7 @@ import pytest
 
 from xvendor.jobs import JOB_ID_RE
 
-needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
+needs_bwrap = pytest.mark.usefixtures("real_bwrap")
 
 
 @pytest.fixture
@@ -20,7 +19,15 @@ def data(tmp_path):
 
 
 @pytest.fixture
-def xv(data, fakes_dir, fixture_path, tmp_path):
+def xv(xv_no_round, codex_isolation):
+    """Run `python -m xvendor` against the fake vendor CLIs, for tests whose round has to run: the subprocess
+    builds the real sandbox, so these skip where it cannot start."""
+    return xv_no_round
+
+
+@pytest.fixture
+def xv_no_round(data, fakes_dir, fixture_path, tmp_path):
+    """xv without the sandbox requirement, for commands that stop before a round runs."""
     base = {k: v for k, v in os.environ.items() if not k.startswith(("XV_", "TMUX"))}
     home = tmp_path / "home"
     (home / ".codex" / "hooks").mkdir(parents=True)
@@ -98,7 +105,7 @@ def test_start_wait_agy(xv, fixture_path):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="bwrap probe is Linux-only")
-def test_start_refuses_when_pidns_unavailable(xv, data, tmp_path):
+def test_start_refuses_when_pidns_unavailable(xv_no_round, data, tmp_path):
     # stands in for bwrap inside a Docker container that masks parts of /proc
     fake = tmp_path / "dockerbin"
     fake.mkdir()
@@ -107,7 +114,7 @@ def test_start_refuses_when_pidns_unavailable(xv, data, tmp_path):
     )
     (fake / "bwrap").chmod(0o755)
     path = f"{fake}{os.pathsep}{os.environ['PATH']}"
-    proc = xv("start", "codex", "-m", "q", "--no-pane", PATH=path)
+    proc = xv_no_round("start", "codex", "-m", "q", "--no-pane", PATH=path)
     assert proc.returncode == 2
     for want in ("Can't mount proc", "systempaths=unconfined", "XV_NO_PIDNS=1"):
         assert want in proc.stderr
@@ -121,8 +128,8 @@ def test_start_without_pidns_runs_read_only(xv, data):
     assert json.loads((data / "jobs" / job / "meta.json").read_text())["pidns"] is False
 
 
-def test_start_without_pidns_refuses_write(xv, tmp_path):
-    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", make_worktree(tmp_path), XV_NO_PIDNS=1)
+def test_start_without_pidns_refuses_write(xv_no_round, tmp_path):
+    proc = xv_no_round("start", "codex", "-m", "q", "--no-pane", "--write", make_worktree(tmp_path), XV_NO_PIDNS=1)
     assert proc.returncode == 2
     assert "--write needs a pid namespace" in proc.stderr
 
@@ -263,7 +270,6 @@ def test_wait_reports_nested_git(xv, data, tmp_path):
     assert "nested git repositories" in proc.stderr
     assert json.loads((data / "jobs" / job / "meta.json").read_text())["nested_git"]
 
-
 @pytest.mark.parametrize("command", ["wait", "show", "_run"])
 def test_nested_git_warning_escapes_control_chars(command, data, tmp_path, monkeypatch, capsys):
     import argparse
@@ -290,7 +296,7 @@ def test_nested_git_warning_escapes_control_chars(command, data, tmp_path, monke
     assert r"/w/目錄/a\x1b[2Kb\rc\nxv: fake\x9b\u202e\\d/.git" in text.replace("\n", "")  # the pane may wrap lines
 
 
-def test_start_write_refuses_gitlinks(xv, tmp_path):
+def test_start_write_refuses_gitlinks(xv_no_round, tmp_path):
     main = tmp_path / "main-wt"
     ident = ["-c", "user.name=t", "-c", "user.email=t@x"]
     subprocess.run(["git", "init", "-q", str(main)], check=True)
@@ -300,7 +306,7 @@ def test_start_write_refuses_gitlinks(xv, tmp_path):
     subprocess.run(["git", "-C", str(main), "update-index", "--add", "--cacheinfo", f"160000,{sha},sub"], check=True)
     subprocess.run(["git", "-C", str(main), *ident, "commit", "-q", "-m", "init"], check=True)
     subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "../wt", "-b", "lane"], check=True)
-    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", tmp_path / "wt")
+    proc = xv_no_round("start", "codex", "-m", "q", "--no-pane", "--write", tmp_path / "wt")
     assert proc.returncode == 2
     assert "submodule" in proc.stderr
 
@@ -341,42 +347,42 @@ def test_ask_rejects_write(xv, tmp_path):
     assert "ask only takes" in proc.stderr
 
 
-def test_start_write_missing_dir(xv, tmp_path):
-    proc = xv("start", "codex", "-m", "q", "--no-pane", "--write", tmp_path / "nope")
+def test_start_write_missing_dir(xv_no_round, tmp_path):
+    proc = xv_no_round("start", "codex", "-m", "q", "--no-pane", "--write", tmp_path / "nope")
     assert proc.returncode == 2
     assert f"xv: --write does not exist: {tmp_path / 'nope'}" in proc.stderr
 
 
-def test_start_write_refuses_git_dir(xv, tmp_path):
+def test_start_write_refuses_git_dir(xv_no_round, tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", repo)
+    proc = xv_no_round("start", "codex", "-m", "x", "--no-pane", "--write", repo)
     assert proc.returncode == 2
     assert "git worktree add" in proc.stderr
 
 
-def test_start_write_refuses_separate_git_dir(xv, tmp_path):
+def test_start_write_refuses_separate_git_dir(xv_no_round, tmp_path):
     subprocess.run(
         ["git", "init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(tmp_path / "sepwt")], check=True
     )
-    proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "sepwt")
+    proc = xv_no_round("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "sepwt")
     assert proc.returncode == 2
     assert "git worktree add" in proc.stderr
 
 
-def test_start_write_refuses_plain_dir(xv, tmp_path):
+def test_start_write_refuses_plain_dir(xv_no_round, tmp_path):
     (tmp_path / "plain").mkdir()
-    proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "plain")
+    proc = xv_no_round("start", "codex", "-m", "x", "--no-pane", "--write", tmp_path / "plain")
     assert proc.returncode == 2
     assert "git worktree add" in proc.stderr
 
 
-def test_start_write_refuses_hidden_or_state_dir(xv, tmp_path):
+def test_start_write_refuses_hidden_or_state_dir(xv_no_round, tmp_path):
     for rel in (".codex", ".ssh"):
         base = tmp_path / "home" / rel
         base.mkdir(parents=True, exist_ok=True)
         d = make_worktree(base)
-        proc = xv("start", "codex", "-m", "x", "--no-pane", "--write", d)
+        proc = xv_no_round("start", "codex", "-m", "x", "--no-pane", "--write", d)
         assert proc.returncode == 2, proc.stderr
         assert "hides" in proc.stderr
 
@@ -406,14 +412,14 @@ def test_doctor_reports_vendor_error(xv, fixture_path):
     assert "This content was flagged" in proc.stdout
 
 
-def test_doctor_missing_cli(xv):
-    proc = xv("doctor", "agy", PATH="/usr/bin:/bin")
+def test_doctor_missing_cli(xv_no_round):
+    proc = xv_no_round("doctor", "agy", PATH="/usr/bin:/bin")
     assert proc.returncode == 1
     assert proc.stdout == "agy    FAIL  0s  agy not found on PATH\n"
 
 
-def test_list_empty(xv):
-    proc = xv("list")
+def test_list_empty(xv_no_round):
+    proc = xv_no_round("list")
     assert (proc.returncode, proc.stdout) == (0, "")
 
 

@@ -188,7 +188,7 @@ uv sync
 uv run pytest
 ```
 
-測試用假的 `codex`、`agy` 腳本（`tests/fakes/`）重播錄好的事件流。需要 tmux 或 bubblewrap 的測試，在它們起不來時（例如在擋掉 unix socket 的沙箱裡）會跳過。GIF 和兩張示意圖的製作方法：[docs/demo/](docs/demo/)。
+測試用假的 `codex`、`agy` 腳本（`tests/fakes/`）重播錄好的事件流。需要 tmux 或 bubblewrap 的測試，在它們起不來時（例如在擋掉 unix socket 或新命名空間的沙箱裡）會跳過。Linux 上設了 `CI` 時，bubblewrap 起不來會讓這些測試失敗而不是跳過，限制 user namespace 的 runner 才不會靠跳過變綠。GIF 和兩張示意圖的製作方法：[docs/demo/](docs/demo/)。
 
 相關專案：mango-mods 裡的 [xv-band](https://github.com/mangow314/mango-mods/tree/master/xv-band) 會在 Claude Code 提示框上方列出執行中的 xv job。
 

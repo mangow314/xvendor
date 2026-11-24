@@ -402,8 +402,10 @@ uv run pytest
 
 The tests use fake `codex` and `agy` scripts (`tests/fakes/`) that replay
 recorded event streams. Tests that need tmux or bubblewrap are skipped when
-those cannot start (for example in a sandbox that blocks unix sockets). How the GIF and
-the diagrams were made: [docs/demo/](docs/demo/).
+those cannot start (for example in a sandbox that blocks unix sockets or new
+namespaces). On Linux with `CI` set, a bubblewrap that cannot start fails
+those tests instead, so a runner that restricts user namespaces does not pass
+by skipping. How the GIF and the diagrams were made: [docs/demo/](docs/demo/).
 
 Related: [xv-band](https://github.com/mangow314/mango-mods/tree/master/xv-band)
 in mango-mods shows running xv jobs in a row above the Claude Code prompt.

@@ -14,13 +14,13 @@ from xvendor.jobs import JobError, JobStore
 from xvendor.vendors.agy import AgyVendor
 from xvendor.vendors.codex import CodexVendor
 
-needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
+needs_bwrap = pytest.mark.usefixtures("real_bwrap")
 
 
 @pytest.fixture(autouse=True)
-def codex_home(fake_home, monkeypatch):
-    """Vendors pass isolation.check against fake_home; without bwrap, wrap becomes a passthrough."""
-    if sys.platform != "linux" or shutil.which("bwrap") is None:
+def codex_home(fake_home, monkeypatch, bwrap_unusable):
+    """Vendors pass isolation.check against fake_home; without a usable bwrap, wrap becomes a passthrough."""
+    if sys.platform != "linux" or bwrap_unusable:
         monkeypatch.setattr(runner, "wrap", lambda vendor, argv, tmpdir, writable=None, pidns=True: list(argv))
 
 

@@ -10,7 +10,11 @@ import pytest
 from xvendor import isolation
 from xvendor.isolation import UnsupportedPlatform, wrap
 
-needs_bwrap = pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap")
+needs_bwrap = pytest.mark.usefixtures("real_bwrap")
+# for tests that only build the bwrap argv: wrap() looks bwrap up on PATH and never runs it
+needs_bwrap_on_path = pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="needs bwrap on PATH"
+)
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -110,7 +114,7 @@ def test_real_bwrap_codex_state(tmp_path_factory, monkeypatch):
     assert proc.stdout.splitlines() == ["ok", "denied", "denied", "TOKEN", run_listing()]
 
 
-@needs_bwrap
+@needs_bwrap_on_path
 def test_agy_argv_structure(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
@@ -182,7 +186,7 @@ def test_agy_argv_structure(tmp_path, monkeypatch):
 
 
 @pytest.mark.usefixtures("fake_home")
-@needs_bwrap
+@needs_bwrap_on_path
 def test_agy_x11_tmpfs_follows_host_dir(tmp_path, monkeypatch):
     real_isdir = os.path.isdir
     monkeypatch.setattr(isolation.os.path, "isdir", lambda p: True if p == "/tmp/.X11-unix" else real_isdir(p))
@@ -193,7 +197,7 @@ def test_agy_x11_tmpfs_follows_host_dir(tmp_path, monkeypatch):
 
 
 @pytest.mark.usefixtures("fake_home")
-@needs_bwrap
+@needs_bwrap_on_path
 def test_resolv_rebound_when_under_run(tmp_path, monkeypatch):
     real = "/run/systemd/resolve/stub-resolv.conf"
     real_realpath, real_isfile = os.path.realpath, os.path.isfile
@@ -208,7 +212,7 @@ def test_resolv_rebound_when_under_run(tmp_path, monkeypatch):
 
 
 @pytest.mark.usefixtures("fake_home")
-@needs_bwrap
+@needs_bwrap_on_path
 def test_agy_skips_missing_tmux_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path / "nowhere"))
     argv = wrap("agy", ["agy"], tmp_path)
@@ -491,7 +495,7 @@ def test_real_bwrap_agy_bin_shadow_discarded(tmp_path_factory, monkeypatch):
     assert (tmp / "shadow" / "bin" / "agentapi").read_text() == "changed"
 
 
-@needs_bwrap
+@needs_bwrap_on_path
 def test_agy_refused_when_protected_entry_missing(tmp_path, monkeypatch):
     state = tmp_path / ".gemini" / "antigravity-cli"
     (state / "bin").mkdir(parents=True)
